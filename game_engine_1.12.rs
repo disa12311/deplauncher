@@ -1353,3 +1353,13 @@ impl WasmAdvancedGameEngine {
     #[wasm_bindgen]
     pub fn cleanup(&self) {
         console_log!("Cleaning up WASM Advanced Game Engine v1.12");
+        self.game_state.borrow_mut().cleanup();
+    }
+}
+
+// Entry point for WASM
+#[wasm_bindgen(start)]
+pub fn main() {
+    console_log!("WASM Advanced Game Engine v1.12 Enhanced Edition loaded successfully!");
+    console_log!("Features: ECS Architecture, Advanced Physics, AI, Networking, PBR Rendering");
+}
