@@ -1,31 +1,13 @@
-// static/app.js — simple app logic for deplauncher
-
-
-async function clearCache(){
-await caches.delete(CACHE_NAME)
-await saveMeta(null)
-log('Cache cleared')
+// static/app.js — simple app logic for deplauncher (with Play button + handshake)
+tries++
+if(tries>maxRetries){ clearInterval(iv); log('Đã hết lần thử gửi START') ; return }
+sendStart()
+}, 600)
+}
 }
 
 
-async function saveMeta(obj){
-try{ localStorage.setItem(STORE_KEY, obj ? JSON.stringify(obj) : '') }catch(e){/*ignore*/}
-}
-
-
-async function handleFile(file){
-log('Handling file:', file.name, file.type, file.size)
-progress.value = 0
-const CHUNK = 64 * 1024
-// for demo: we just save blob directly
-await saveToCache('eaglercraft_offline', file)
-const url = URL.createObjectURL(file)
-player.src = url
-log('Loaded into iframe')
-progress.value = 100
-}
-
-
+// handle drag & drop
 drop.addEventListener('dragover', e => { e.preventDefault(); drop.style.borderColor = '#60a5fa' })
 drop.addEventListener('dragleave', e => { drop.style.borderColor = '' })
 drop.addEventListener('drop', e => {
@@ -70,6 +52,21 @@ window.open(url, '_blank')
 })
 
 
+btnPlay.addEventListener('click', async ()=>{
+await tryPlayFromCache()
+})
+
+
+// listen messages from iframe (optional, trang con có thể trả lời)
+window.addEventListener('message', (ev)=>{
+try{
+const d = ev.data
+if(d && d.type === 'deplauncher:ready'){ log('Iframe báo sẵn sàng:', d) }
+if(d && d.type === 'deplauncher:log'){ log('Iframe:', d.msg) }
+}catch(e){/*ignore*/}
+})
+
+
 // initial load: try load from cache
 (async ()=>{
 try{
@@ -77,4 +74,6 @@ const b = await getFromCache('eaglercraft_offline')
 if(b){ player.src = URL.createObjectURL(b); log('Loaded cached file') }
 }catch(e){ log('Init load failed', e) }
 })()
+
+
 })()
