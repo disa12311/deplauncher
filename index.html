@@ -1,0 +1,402 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Game Launcher - Chọn Phiên Bản</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #0c0c0c 0%, #1a1a2e 50%, #16213e 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            overflow: hidden;
+        }
+
+        /* Animated background particles */
+        .particles {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            z-index: -1;
+        }
+
+        .particle {
+            position: absolute;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 50%;
+            animation: float 6s ease-in-out infinite;
+        }
+
+        @keyframes float {
+            0%, 100% { transform: translateY(0px) rotate(0deg); }
+            50% { transform: translateY(-20px) rotate(180deg); }
+        }
+
+        .launcher-container {
+            background: rgba(255, 255, 255, 0.05);
+            backdrop-filter: blur(20px);
+            border-radius: 20px;
+            padding: 60px 80px;
+            text-align: center;
+            box-shadow: 0 25px 50px rgba(0, 0, 0, 0.3);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            transform: translateY(0);
+            animation: slideIn 1s ease-out;
+            max-width: 600px;
+            width: 90%;
+        }
+
+        @keyframes slideIn {
+            0% {
+                opacity: 0;
+                transform: translateY(50px);
+            }
+            100% {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .logo {
+            font-size: 3rem;
+            font-weight: bold;
+            margin-bottom: 10px;
+            background: linear-gradient(45deg, #00d4ff, #ff006e, #8338ec);
+            background-size: 300% 300%;
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            animation: gradientShift 3s ease-in-out infinite;
+        }
+
+        @keyframes gradientShift {
+            0%, 100% { background-position: 0% 50%; }
+            50% { background-position: 100% 50%; }
+        }
+
+        .subtitle {
+            color: #b0b0b0;
+            font-size: 1.2rem;
+            margin-bottom: 40px;
+            opacity: 0;
+            animation: fadeIn 1s ease-out 0.5s forwards;
+        }
+
+        @keyframes fadeIn {
+            0% { opacity: 0; }
+            100% { opacity: 1; }
+        }
+
+        .version-selector {
+            display: flex;
+            gap: 30px;
+            justify-content: center;
+            flex-wrap: wrap;
+        }
+
+        .version-card {
+            background: rgba(255, 255, 255, 0.08);
+            border-radius: 15px;
+            padding: 30px;
+            min-width: 200px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            border: 2px solid transparent;
+            position: relative;
+            overflow: hidden;
+            opacity: 0;
+            transform: translateY(30px);
+        }
+
+        .version-card:nth-child(1) {
+            animation: slideUp 0.8s ease-out 0.8s forwards;
+        }
+
+        .version-card:nth-child(2) {
+            animation: slideUp 0.8s ease-out 1s forwards;
+        }
+
+        @keyframes slideUp {
+            0% {
+                opacity: 0;
+                transform: translateY(30px);
+            }
+            100% {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .version-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: -100%;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.1), transparent);
+            transition: left 0.5s;
+        }
+
+        .version-card:hover::before {
+            left: 100%;
+        }
+
+        .version-card:hover {
+            transform: translateY(-10px);
+            border-color: #00d4ff;
+            box-shadow: 0 20px 40px rgba(0, 212, 255, 0.2);
+            background: rgba(0, 212, 255, 0.1);
+        }
+
+        .version-card.v18:hover {
+            border-color: #ff6b35;
+            box-shadow: 0 20px 40px rgba(255, 107, 53, 0.2);
+            background: rgba(255, 107, 53, 0.1);
+        }
+
+        .version-number {
+            font-size: 2.5rem;
+            font-weight: bold;
+            margin-bottom: 15px;
+            color: #00d4ff;
+        }
+
+        .version-card.v18 .version-number {
+            color: #ff6b35;
+        }
+
+        .version-title {
+            font-size: 1.1rem;
+            margin-bottom: 10px;
+            font-weight: 600;
+        }
+
+        .version-description {
+            color: #888;
+            font-size: 0.9rem;
+            line-height: 1.5;
+            margin-bottom: 20px;
+        }
+
+        .play-button {
+            background: linear-gradient(45deg, #00d4ff, #0099cc);
+            border: none;
+            padding: 12px 30px;
+            border-radius: 25px;
+            color: white;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            font-size: 1rem;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .version-card.v18 .play-button {
+            background: linear-gradient(45deg, #ff6b35, #cc4400);
+        }
+
+        .play-button:hover {
+            transform: scale(1.05);
+            box-shadow: 0 10px 20px rgba(0, 212, 255, 0.3);
+        }
+
+        .version-card.v18 .play-button:hover {
+            box-shadow: 0 10px 20px rgba(255, 107, 53, 0.3);
+        }
+
+        .play-button:active {
+            transform: scale(0.95);
+        }
+
+        .status-indicator {
+            position: absolute;
+            top: 15px;
+            right: 15px;
+            width: 10px;
+            height: 10px;
+            background: #00ff88;
+            border-radius: 50%;
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0% {
+                box-shadow: 0 0 0 0 rgba(0, 255, 136, 0.7);
+            }
+            70% {
+                box-shadow: 0 0 0 10px rgba(0, 255, 136, 0);
+            }
+            100% {
+                box-shadow: 0 0 0 0 rgba(0, 255, 136, 0);
+            }
+        }
+
+        @media (max-width: 768px) {
+            .launcher-container {
+                padding: 40px 30px;
+            }
+            
+            .version-selector {
+                flex-direction: column;
+                align-items: center;
+            }
+            
+            .version-card {
+                min-width: 280px;
+            }
+        }
+
+        /* Loading effect */
+        .loading {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.9);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+        }
+
+        .loading-spinner {
+            width: 50px;
+            height: 50px;
+            border: 3px solid rgba(255, 255, 255, 0.1);
+            border-top: 3px solid #00d4ff;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <div class="particles">
+        <!-- Particles sẽ được tạo bằng JavaScript -->
+    </div>
+
+    <div class="loading" id="loading">
+        <div class="loading-spinner"></div>
+    </div>
+
+    <div class="launcher-container">
+        <div class="logo">GAME LAUNCHER</div>
+        <div class="subtitle">Chọn phiên bản để bắt đầu chơi</div>
+        
+        <div class="version-selector">
+            <div class="version-card v18" onclick="launchVersion('1.8')">
+                <div class="status-indicator"></div>
+                <div class="version-number">1.8</div>
+                <div class="version-title">Classic Edition</div>
+                <div class="version-description">
+                    Phiên bản ổn định với tính năng cơ bản. 
+                    Phù hợp cho máy có cấu hình thấp.
+                </div>
+                <button class="play-button">Play</button>
+            </div>
+
+            <div class="version-card v112" onclick="launchVersion('1.12')">
+                <div class="status-indicator"></div>
+                <div class="version-number">1.12</div>
+                <div class="version-title">Enhanced Edition</div>
+                <div class="version-description">
+                    Phiên bản nâng cao với nhiều tính năng mới. 
+                    Trải nghiệm game tốt nhất.
+                </div>
+                <button class="play-button">Play</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Tạo particles background
+        function createParticles() {
+            const particlesContainer = document.querySelector('.particles');
+            const particleCount = 50;
+
+            for (let i = 0; i < particleCount; i++) {
+                const particle = document.createElement('div');
+                particle.className = 'particle';
+                
+                // Random size và vị trí
+                const size = Math.random() * 4 + 2;
+                particle.style.width = size + 'px';
+                particle.style.height = size + 'px';
+                particle.style.left = Math.random() * 100 + '%';
+                particle.style.top = Math.random() * 100 + '%';
+                particle.style.animationDelay = Math.random() * 6 + 's';
+                particle.style.animationDuration = (Math.random() * 3 + 4) + 's';
+                
+                particlesContainer.appendChild(particle);
+            }
+        }
+
+        // Hàm launch phiên bản
+        function launchVersion(version) {
+            // Hiện loading
+            document.getElementById('loading').style.display = 'flex';
+            
+            // Giả lập loading time
+            setTimeout(() => {
+                let filename;
+                if (version === '1.8') {
+                    filename = 'deplauncher-1.8.html';
+                } else if (version === '1.12') {
+                    filename = 'deplauncher-1.12.html';
+                }
+                
+                // Mở file tương ứng
+                try {
+                    window.location.href = filename;
+                } catch (error) {
+                    console.log('Đang chuyển đến:', filename);
+                    // Trong môi trường thực tế, có thể cần xử lý khác
+                    alert(`Đang khởi chạy phiên bản ${version}...\nFile: ${filename}`);
+                    document.getElementById('loading').style.display = 'none';
+                }
+            }, 2000);
+        }
+
+        // Khởi tạo particles khi trang load
+        document.addEventListener('DOMContentLoaded', function() {
+            createParticles();
+        });
+
+        // Thêm sound effects (optional)
+        function playClickSound() {
+            // Có thể thêm âm thanh click ở đây
+        }
+
+        // Thêm hover sound effects cho buttons
+        document.querySelectorAll('.version-card').forEach(card => {
+            card.addEventListener('mouseenter', function() {
+                this.style.transform = 'translateY(-10px) scale(1.02)';
+            });
+            
+            card.addEventListener('mouseleave', function() {
+                this.style.transform = 'translateY(0) scale(1)';
+            });
+        });
+    </script>
+</body>
+</html>
