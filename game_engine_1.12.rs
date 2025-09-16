@@ -1,24 +1,12 @@
 use wasm_bindgen::prelude::*;
-use wasm_bindgen_futures::*;
 use js_sys::*;
 use web_sys::*;
 use std::collections::{HashMap, VecDeque};
-use std::cell::RefCell;
-use std::rc::Rc;
-use std::sync::{Arc, Mutex};
 use nalgebra::{Vector3, Matrix4, Quaternion, UnitQuaternion};
 use serde::{Serialize, Deserialize};
 
 // Advanced Game Engine for Deplauncher 1.12 - Enhanced Edition (Rust)
-// State-of-the-art engine with advanced physics, AI, networking, and graphics
-
-const MAX_ENTITIES: usize = 5000;
-const MAX_PARTICLES: usize = 10000;
-const MAX_LIGHTS: usize = 50;
-const CANVAS_WIDTH: f32 = 1920.0;
-const CANVAS_HEIGHT: f32 = 1080.0;
-const PHYSICS_SUBSTEPS: usize = 4;
-const NETWORKING_BUFFER_SIZE: usize = 8192;
+// Cleaned and optimized version with better architecture and performance
 
 #[wasm_bindgen]
 extern "C" {
@@ -27,19 +15,22 @@ extern "C" {
     
     #[wasm_bindgen(js_namespace = performance)]
     fn now() -> f64;
-    
-    #[wasm_bindgen(js_namespace = WebSocket)]
-    type WebSocket;
-    
-    #[wasm_bindgen(constructor)]
-    fn new(url: &str) -> WebSocket;
 }
 
 macro_rules! console_log {
     ($($t:tt)*) => (log(&format_args!($($t)*).to_string()))
 }
 
-// Advanced Transform component with full 3D support
+// === CONSTANTS ===
+const MAX_ENTITIES: usize = 5000;
+const MAX_PARTICLES: usize = 10000;
+const MAX_LIGHTS: usize = 50;
+const CANVAS_WIDTH: f32 = 1920.0;
+const CANVAS_HEIGHT: f32 = 1080.0;
+const PHYSICS_SUBSTEPS: usize = 4;
+
+// === CORE COMPONENTS ===
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct Transform {
     pub position: Vector3<f32>,
@@ -49,7 +40,7 @@ pub struct Transform {
 
 impl Default for Transform {
     fn default() -> Self {
-        Transform {
+        Self {
             position: Vector3::zeros(),
             rotation: UnitQuaternion::identity(),
             scale: Vector3::new(1.0, 1.0, 1.0),
@@ -58,9 +49,9 @@ impl Default for Transform {
 }
 
 impl Transform {
-    pub fn new(pos: Vector3<f32>) -> Self {
-        Transform {
-            position: pos,
+    pub fn new(position: Vector3<f32>) -> Self {
+        Self {
+            position,
             ..Default::default()
         }
     }
@@ -75,16 +66,11 @@ impl Transform {
         self.rotation * Vector3::z()
     }
     
-    pub fn right(&self) -> Vector3<f32> {
-        self.rotation * Vector3::x()
-    }
-    
-    pub fn up(&self) -> Vector3<f32> {
-        self.rotation * Vector3::y()
+    pub fn translate(&mut self, delta: Vector3<f32>) {
+        self.position += delta;
     }
 }
 
-// Advanced Physics Component
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct Physics {
     pub velocity: Vector3<f32>,
@@ -97,13 +83,11 @@ pub struct Physics {
     pub bounciness: f32,
     pub is_kinematic: bool,
     pub use_gravity: bool,
-    pub freeze_rotation: [bool; 3],
-    pub freeze_position: [bool; 3],
 }
 
 impl Default for Physics {
     fn default() -> Self {
-        Physics {
+        Self {
             velocity: Vector3::zeros(),
             acceleration: Vector3::zeros(),
             angular_velocity: Vector3::zeros(),
@@ -114,78 +98,40 @@ impl Default for Physics {
             bounciness: 0.5,
             is_kinematic: false,
             use_gravity: true,
-            freeze_rotation: [false; 3],
-            freeze_position: [false; 3],
         }
     }
 }
 
-// Advanced Rendering Component
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Renderer {
     pub mesh_id: u32,
     pub material_id: u32,
-    pub texture_ids: Vec<u32>,
     pub color: [f32; 4],
     pub metallic: f32,
     pub roughness: f32,
     pub emission: [f32; 3],
-    pub normal_strength: f32,
     pub cast_shadows: bool,
     pub receive_shadows: bool,
-    pub layer: u8,
     pub visible: bool,
 }
 
 impl Default for Renderer {
     fn default() -> Self {
-        Renderer {
+        Self {
             mesh_id: 0,
             material_id: 0,
-            texture_ids: Vec::new(),
             color: [1.0, 1.0, 1.0, 1.0],
             metallic: 0.0,
             roughness: 0.5,
             emission: [0.0, 0.0, 0.0],
-            normal_strength: 1.0,
             cast_shadows: true,
             receive_shadows: true,
-            layer: 0,
             visible: true,
         }
     }
 }
 
-// AI Component with behavior tree support
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AI {
-    pub behavior_tree: String,
-    pub state: String,
-    pub target_entity: Option<u32>,
-    pub target_position: Option<Vector3<f32>>,
-    pub path: VecDeque<Vector3<f32>>,
-    pub decision_timer: f32,
-    pub memory: HashMap<String, f32>,
-    pub enabled: bool,
-}
-
-impl Default for AI {
-    fn default() -> Self {
-        AI {
-            behavior_tree: "idle".to_string(),
-            state: "idle".to_string(),
-            target_entity: None,
-            target_position: None,
-            path: VecDeque::new(),
-            decision_timer: 0.0,
-            memory: HashMap::new(),
-            enabled: true,
-        }
-    }
-}
-
-// Health Component
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct Health {
     pub current: f32,
     pub max: f32,
@@ -197,7 +143,7 @@ pub struct Health {
 
 impl Default for Health {
     fn default() -> Self {
-        Health {
+        Self {
             current: 100.0,
             max: 100.0,
             regeneration: 0.0,
@@ -208,70 +154,72 @@ impl Default for Health {
     }
 }
 
-// Network Component
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Network {
-    pub owner_id: u32,
-    pub networked: bool,
-    pub authority: bool,
-    pub last_sync_time: f64,
-    pub interpolate: bool,
-    pub extrapolate: bool,
+pub struct AI {
+    pub behavior_state: AIState,
+    pub target_entity: Option<u32>,
+    pub target_position: Option<Vector3<f32>>,
+    pub path: VecDeque<Vector3<f32>>,
+    pub decision_timer: f32,
+    pub enabled: bool,
 }
 
-impl Default for Network {
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum AIState {
+    Idle,
+    Wander,
+    Seek,
+    Flee,
+    Follow,
+}
+
+impl Default for AI {
     fn default() -> Self {
-        Network {
-            owner_id: 0,
-            networked: false,
-            authority: true,
-            last_sync_time: 0.0,
-            interpolate: true,
-            extrapolate: false,
+        Self {
+            behavior_state: AIState::Idle,
+            target_entity: None,
+            target_position: None,
+            path: VecDeque::new(),
+            decision_timer: 0.0,
+            enabled: true,
         }
     }
 }
 
-// Advanced Entity with ECS architecture
+// === ENTITY SYSTEM ===
+
 #[wasm_bindgen]
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AdvancedEntity {
+pub struct Entity {
     pub id: u32,
     pub name: String,
     pub tag: String,
-    pub layer: u8,
     pub active: bool,
     
-    // Components
+    // Core components
     pub transform: Transform,
     pub physics: Option<Physics>,
     pub renderer: Option<Renderer>,
     pub health: Option<Health>,
     pub ai: Option<AI>,
-    pub network: Option<Network>,
-    
-    // Custom component data
-    pub custom_data: HashMap<String, f32>,
 }
 
-impl AdvancedEntity {
+impl Entity {
     pub fn new(id: u32, name: String, position: Vector3<f32>) -> Self {
-        AdvancedEntity {
+        Self {
             id,
             name,
             tag: "Untagged".to_string(),
-            layer: 0,
             active: true,
             transform: Transform::new(position),
             physics: None,
             renderer: None,
             health: None,
             ai: None,
-            network: None,
-            custom_data: HashMap::new(),
         }
     }
     
+    // Component management
     pub fn add_physics(&mut self) -> &mut Physics {
         self.physics = Some(Physics::default());
         self.physics.as_mut().unwrap()
@@ -296,17 +244,19 @@ impl AdvancedEntity {
         self.ai.as_mut().unwrap()
     }
     
-    pub fn add_network(&mut self, owner_id: u32) -> &mut Network {
-        self.network = Some(Network {
-            owner_id,
-            networked: true,
-            ..Default::default()
-        });
-        self.network.as_mut().unwrap()
+    // Utility methods
+    pub fn has_component<T>(&self) -> bool {
+        // This would be implemented with proper reflection in a full ECS
+        true
+    }
+    
+    pub fn is_alive(&self) -> bool {
+        self.active && self.health.as_ref().map_or(true, |h| h.current > 0.0)
     }
 }
 
-// Advanced Particle System
+// === PARTICLE SYSTEM ===
+
 #[derive(Debug, Clone)]
 pub struct Particle {
     pub position: Vector3<f32>,
@@ -319,49 +269,19 @@ pub struct Particle {
     pub life: f32,
     pub max_life: f32,
     pub active: bool,
-    pub particle_type: ParticleType,
-}
-
-#[derive(Debug, Clone)]
-pub enum ParticleType {
-    Fire,
-    Smoke,
-    Spark,
-    Magic,
-    Explosion,
-    Trail,
 }
 
 #[derive(Debug)]
 pub struct ParticleSystem {
     particles: Vec<Particle>,
-    emitters: Vec<ParticleEmitter>,
     gravity: Vector3<f32>,
     wind: Vector3<f32>,
 }
 
-#[derive(Debug)]
-pub struct ParticleEmitter {
-    pub position: Vector3<f32>,
-    pub rate: f32,
-    pub life_time: f32,
-    pub particle_life: f32,
-    pub velocity: Vector3<f32>,
-    pub velocity_random: Vector3<f32>,
-    pub color_start: [f32; 4],
-    pub color_end: [f32; 4],
-    pub size_start: f32,
-    pub size_end: f32,
-    pub particle_type: ParticleType,
-    pub active: bool,
-    pub timer: f32,
-}
-
 impl ParticleSystem {
     pub fn new() -> Self {
-        ParticleSystem {
+        Self {
             particles: Vec::with_capacity(MAX_PARTICLES),
-            emitters: Vec::new(),
             gravity: Vector3::new(0.0, -98.0, 0.0),
             wind: Vector3::zeros(),
         }
@@ -374,104 +294,69 @@ impl ParticleSystem {
                 return false;
             }
             
-            // Apply physics
+            // Apply forces
             particle.acceleration += self.gravity + self.wind;
             particle.velocity += particle.acceleration * delta_time;
             particle.position += particle.velocity * delta_time;
             particle.rotation += particle.angular_velocity * delta_time;
             
-            // Update life
+            // Update life and appearance
             particle.life -= delta_time;
             if particle.life <= 0.0 {
                 particle.active = false;
                 return false;
             }
             
-            // Update color and size based on life
             let life_ratio = particle.life / particle.max_life;
-            for i in 0..4 {
-                particle.color[i] *= life_ratio;
-            }
-            particle.size *= 0.99; // Gradually shrink
+            particle.color[3] *= life_ratio.powf(0.5); // Fade out
+            particle.size *= 0.99; // Shrink
             
-            // Reset acceleration for next frame
             particle.acceleration = Vector3::zeros();
-            
             true
         });
-        
-        // Update emitters and spawn new particles
-        for emitter in &mut self.emitters {
-            if !emitter.active {
-                continue;
-            }
-            
-            emitter.timer += delta_time;
-            
-            // Spawn particles based on rate
-            let spawn_interval = 1.0 / emitter.rate;
-            while emitter.timer >= spawn_interval && self.particles.len() < MAX_PARTICLES {
-                self.spawn_particle_from_emitter(emitter);
-                emitter.timer -= spawn_interval;
-            }
-            
-            // Decrease emitter lifetime
-            emitter.life_time -= delta_time;
-            if emitter.life_time <= 0.0 {
-                emitter.active = false;
-            }
-        }
-        
-        // Remove inactive emitters
-        self.emitters.retain(|e| e.active);
-    }
-    
-    fn spawn_particle_from_emitter(&mut self, emitter: &ParticleEmitter) {
-        let random_velocity = Vector3::new(
-            (js_sys::Math::random() as f32 - 0.5) * emitter.velocity_random.x,
-            (js_sys::Math::random() as f32 - 0.5) * emitter.velocity_random.y,
-            (js_sys::Math::random() as f32 - 0.5) * emitter.velocity_random.z,
-        );
-        
-        let particle = Particle {
-            position: emitter.position,
-            velocity: emitter.velocity + random_velocity,
-            acceleration: Vector3::zeros(),
-            color: emitter.color_start,
-            size: emitter.size_start,
-            rotation: 0.0,
-            angular_velocity: (js_sys::Math::random() as f32 - 0.5) * 10.0,
-            life: emitter.particle_life * (0.5 + js_sys::Math::random() as f32 * 0.5),
-            max_life: emitter.particle_life,
-            active: true,
-            particle_type: emitter.particle_type.clone(),
-        };
-        
-        self.particles.push(particle);
     }
     
     pub fn create_explosion(&mut self, position: Vector3<f32>, intensity: f32) {
-        let emitter = ParticleEmitter {
-            position,
-            rate: intensity * 100.0,
-            life_time: 0.5,
-            particle_life: 2.0,
-            velocity: Vector3::zeros(),
-            velocity_random: Vector3::new(200.0, 200.0, 200.0) * intensity,
-            color_start: [1.0, 0.8, 0.2, 1.0],
-            color_end: [1.0, 0.2, 0.0, 0.0],
-            size_start: 5.0 * intensity,
-            size_end: 1.0,
-            particle_type: ParticleType::Explosion,
-            active: true,
-            timer: 0.0,
-        };
+        let particle_count = (intensity * 20.0) as usize;
         
-        self.emitters.push(emitter);
+        for _ in 0..particle_count.min(50) { // Limit burst size
+            if self.particles.len() >= MAX_PARTICLES {
+                break;
+            }
+            
+            let angle = Math::random() * 2.0 * std::f64::consts::PI;
+            let speed = 100.0 + Math::random() * 200.0 * intensity as f64;
+            
+            let velocity = Vector3::new(
+                (angle.cos() * speed) as f32,
+                (angle.sin() * speed) as f32,
+                ((Math::random() - 0.5) * speed * 0.5) as f32,
+            );
+            
+            let particle = Particle {
+                position,
+                velocity,
+                acceleration: Vector3::zeros(),
+                color: [1.0, 0.8, 0.2, 1.0], // Orange fire
+                size: 3.0 + Math::random() as f32 * 4.0,
+                rotation: 0.0,
+                angular_velocity: (Math::random() as f32 - 0.5) * 10.0,
+                life: 1.0 + Math::random() as f32 * 2.0,
+                max_life: 2.0,
+                active: true,
+            };
+            
+            self.particles.push(particle);
+        }
+    }
+    
+    pub fn particle_count(&self) -> usize {
+        self.particles.len()
     }
 }
 
-// Advanced Lighting System
+// === LIGHTING SYSTEM ===
+
 #[derive(Debug, Clone)]
 pub struct Light {
     pub position: Vector3<f32>,
@@ -480,7 +365,6 @@ pub struct Light {
     pub intensity: f32,
     pub range: f32,
     pub light_type: LightType,
-    pub spot_angle: f32,
     pub cast_shadows: bool,
     pub active: bool,
 }
@@ -489,11 +373,11 @@ pub struct Light {
 pub enum LightType {
     Directional,
     Point,
-    Spot,
-    Area,
+    Spot { angle: f32 },
 }
 
-// Advanced Camera System
+// === CAMERA SYSTEM ===
+
 #[derive(Debug, Clone)]
 pub struct Camera {
     pub transform: Transform,
@@ -501,65 +385,65 @@ pub struct Camera {
     pub near: f32,
     pub far: f32,
     pub aspect_ratio: f32,
-    pub projection_matrix: Matrix4<f32>,
-    pub view_matrix: Matrix4<f32>,
-    pub target: Option<u32>, // Entity to follow
+    pub target_entity: Option<u32>,
     pub follow_speed: f32,
-    pub look_ahead: f32,
+    pub smoothing: f32,
 }
 
 impl Camera {
     pub fn new(position: Vector3<f32>, fov: f32, aspect_ratio: f32) -> Self {
-        let mut camera = Camera {
+        Self {
             transform: Transform::new(position),
             fov,
             near: 0.1,
             far: 1000.0,
             aspect_ratio,
-            projection_matrix: Matrix4::identity(),
-            view_matrix: Matrix4::identity(),
-            target: None,
+            target_entity: None,
             follow_speed: 5.0,
-            look_ahead: 2.0,
-        };
-        
-        camera.update_matrices();
-        camera
+            smoothing: 0.1,
+        }
     }
     
-    pub fn update_matrices(&mut self) {
-        self.projection_matrix = Matrix4::new_perspective(
+    pub fn follow_entity(&mut self, target_pos: Vector3<f32>, delta_time: f32) {
+        let lerp_factor = 1.0 - (-self.follow_speed * delta_time).exp();
+        self.transform.position = self.transform.position.lerp(&target_pos, lerp_factor);
+    }
+    
+    pub fn get_view_matrix(&self) -> Matrix4<f32> {
+        let eye = self.transform.position;
+        let target = eye + self.transform.forward();
+        let up = Vector3::y();
+        Matrix4::look_at_rh(&eye, &target, &up)
+    }
+    
+    pub fn get_projection_matrix(&self) -> Matrix4<f32> {
+        Matrix4::new_perspective(
             self.aspect_ratio,
             self.fov.to_radians(),
             self.near,
             self.far,
-        );
-        
-        let eye = self.transform.position;
-        let target = eye + self.transform.forward();
-        let up = self.transform.up();
-        
-        self.view_matrix = Matrix4::look_at_rh(&eye, &target, &up);
-    }
-    
-    pub fn follow_entity(&mut self, entity: &AdvancedEntity, delta_time: f32) {
-        let target_pos = entity.transform.position;
-        let predicted_pos = if let Some(physics) = &entity.physics {
-            target_pos + physics.velocity * self.look_ahead
-        } else {
-            target_pos
-        };
-        
-        let lerp_factor = 1.0 - (-self.follow_speed * delta_time).exp();
-        self.transform.position = self.transform.position.lerp(&predicted_pos, lerp_factor);
-        self.update_matrices();
+        )
     }
 }
 
-// Advanced Game State with ECS architecture
+// === PERFORMANCE METRICS ===
+
+#[derive(Debug, Default)]
+pub struct PerformanceMetrics {
+    pub last_frame_time: f64,
+    pub fps_counter: i32,
+    pub fps_timer: f64,
+    pub frame_time_ms: f32,
+    pub entity_count: usize,
+    pub particle_count: usize,
+}
+
+// === MAIN GAME STATE ===
+
 #[wasm_bindgen]
 pub struct AdvancedGameState {
-    entities: HashMap<u32, AdvancedEntity>,
+    // Entity management
+    entities: HashMap<u32, Entity>,
     next_entity_id: u32,
     
     // Systems
@@ -573,53 +457,30 @@ pub struct AdvancedGameState {
     time_scale: f32,
     paused: bool,
     
-    // Performance metrics
-    last_frame_time: f64,
-    fps_counter: i32,
-    fps_timer: f64,
-    frame_time_ms: f32,
-    draw_calls: i32,
+    // Performance
+    performance: PerformanceMetrics,
     
-    // Physics settings
+    // Physics
     gravity: Vector3<f32>,
-    air_density: f32,
     physics_enabled: bool,
     
-    // Input system
+    // Input
     input_state: HashMap<u32, bool>,
-    mouse_position: Vector3<f32>,
-    mouse_delta: Vector3<f32>,
-    
-    // Audio settings
-    master_volume: f32,
-    sfx_volume: f32,
-    music_volume: f32,
-    
-    // Networking
-    multiplayer_enabled: bool,
-    player_id: u32,
-    server_url: String,
-    network_buffer: Vec<u8>,
     
     // Graphics settings
     graphics_quality: u8,
     bloom_enabled: bool,
-    ssao_enabled: bool,
-    motion_blur_enabled: bool,
-    pbr_enabled: bool,
     shadows_enabled: bool,
-    reflections_enabled: bool,
-    exposure: f32,
-    gamma: f32,
+    pbr_enabled: bool,
 }
 
 #[wasm_bindgen]
 impl AdvancedGameState {
     #[wasm_bindgen(constructor)]
-    pub fn new() -> AdvancedGameState {
+    pub fn new() -> Self {
         console_log!("Creating Advanced Game State for v1.12 Enhanced Edition");
         
-        let mut game_state = AdvancedGameState {
+        let mut game_state = Self {
             entities: HashMap::with_capacity(MAX_ENTITIES),
             next_entity_id: 1,
             
@@ -636,38 +497,20 @@ impl AdvancedGameState {
             time_scale: 1.0,
             paused: false,
             
-            last_frame_time: now(),
-            fps_counter: 0,
-            fps_timer: 0.0,
-            frame_time_ms: 0.0,
-            draw_calls: 0,
+            performance: PerformanceMetrics {
+                last_frame_time: now(),
+                ..Default::default()
+            },
             
             gravity: Vector3::new(0.0, -980.0, 0.0),
-            air_density: 1.225,
             physics_enabled: true,
             
             input_state: HashMap::new(),
-            mouse_position: Vector3::zeros(),
-            mouse_delta: Vector3::zeros(),
             
-            master_volume: 1.0,
-            sfx_volume: 0.8,
-            music_volume: 0.6,
-            
-            multiplayer_enabled: false,
-            player_id: 0,
-            server_url: String::new(),
-            network_buffer: Vec::with_capacity(NETWORKING_BUFFER_SIZE),
-            
-            graphics_quality: 2, // High quality by default
+            graphics_quality: 2,
             bloom_enabled: true,
-            ssao_enabled: true,
-            motion_blur_enabled: false,
-            pbr_enabled: true,
             shadows_enabled: true,
-            reflections_enabled: true,
-            exposure: 1.0,
-            gamma: 2.2,
+            pbr_enabled: true,
         };
         
         game_state.initialize_scene();
@@ -675,133 +518,111 @@ impl AdvancedGameState {
     }
     
     fn initialize_scene(&mut self) {
-        // Create advanced player entity with full component setup
+        // Create player entity
         let player_id = self.create_entity("Player".to_string(), Vector3::new(CANVAS_WIDTH / 2.0, CANVAS_HEIGHT / 2.0, 0.0));
         
         if let Some(player) = self.entities.get_mut(&player_id) {
-            // Add physics component
+            // Setup player components
             let physics = player.add_physics();
             physics.mass = 1.0;
             physics.use_gravity = false; // Top-down view
-            physics.drag = 5.0; // High drag for responsive movement
+            physics.drag = 5.0;
             
-            // Add renderer component
             let renderer = player.add_renderer();
-            renderer.color = [0.2, 0.8, 1.0, 1.0]; // Cyan player
+            renderer.color = [0.2, 0.8, 1.0, 1.0]; // Cyan
             renderer.metallic = 0.1;
             renderer.roughness = 0.3;
             
-            // Add health component
             let health = player.add_health(100.0);
-            health.regeneration = 5.0; // HP per second
+            health.regeneration = 5.0;
             
             player.tag = "Player".to_string();
         }
         
-        // Create procedurally generated environment
+        // Generate environment
         self.generate_environment();
         
         // Setup lighting
         self.setup_lighting();
         
-        // Set camera to follow player
-        self.camera.target = Some(player_id);
+        // Set camera target
+        self.camera.target_entity = Some(player_id);
         
-        console_log!("Advanced scene initialized with {} entities", self.entities.len());
+        console_log!("Scene initialized with {} entities", self.entities.len());
     }
     
     fn generate_environment(&mut self) {
-        // Create various types of environment objects
+        // Create environment objects
         for i in 0..100 {
-            let x = js_sys::Math::random() as f32 * CANVAS_WIDTH;
-            let y = js_sys::Math::random() as f32 * CANVAS_HEIGHT;
-            let z = (js_sys::Math::random() as f32 - 0.5) * 200.0;
+            let position = Vector3::new(
+                Math::random() as f32 * CANVAS_WIDTH,
+                Math::random() as f32 * CANVAS_HEIGHT,
+                (Math::random() as f32 - 0.5) * 200.0,
+            );
             
-            let entity_id = self.create_entity(format!("Environment_{}", i), Vector3::new(x, y, z));
+            let entity_id = self.create_entity(format!("Environment_{}", i), position);
             
             if let Some(entity) = self.entities.get_mut(&entity_id) {
                 // Add physics
                 let physics = entity.add_physics();
-                physics.mass = 0.5 + js_sys::Math::random() as f32 * 2.0;
-                physics.bounciness = 0.3 + js_sys::Math::random() as f32 * 0.7;
-                physics.friction = 0.1 + js_sys::Math::random() as f32 * 0.8;
+                physics.mass = 0.5 + Math::random() as f32 * 2.0;
+                physics.bounciness = 0.3 + Math::random() as f32 * 0.7;
+                physics.friction = 0.1 + Math::random() as f32 * 0.8;
                 
-                // Add renderer with random materials
+                // Add renderer
                 let renderer = entity.add_renderer();
                 renderer.color = [
-                    0.5 + js_sys::Math::random() as f32 * 0.5,
-                    0.5 + js_sys::Math::random() as f32 * 0.5,
-                    0.5 + js_sys::Math::random() as f32 * 0.5,
+                    0.5 + Math::random() as f32 * 0.5,
+                    0.5 + Math::random() as f32 * 0.5,
+                    0.5 + Math::random() as f32 * 0.5,
                     1.0,
                 ];
-                renderer.metallic = js_sys::Math::random() as f32;
-                renderer.roughness = 0.2 + js_sys::Math::random() as f32 * 0.8;
+                renderer.metallic = Math::random() as f32;
+                renderer.roughness = 0.2 + Math::random() as f32 * 0.8;
                 
-                // Some objects have AI
-                if js_sys::Math::random() < 0.3 {
+                // Some have AI
+                if Math::random() < 0.3 {
                     let ai = entity.add_ai();
-                    ai.behavior_tree = "wander".to_string();
-                    ai.state = "idle".to_string();
+                    ai.behavior_state = AIState::Wander;
                 }
                 
                 entity.tag = "Environment".to_string();
             }
         }
-        
-        // Create some special interactive objects
-        for i in 0..20 {
-            let x = js_sys::Math::random() as f32 * CANVAS_WIDTH;
-            let y = js_sys::Math::random() as f32 * CANVAS_HEIGHT;
-            
-            let entity_id = self.create_entity(format!("Interactive_{}", i), Vector3::new(x, y, 0.0));
-            
-            if let Some(entity) = self.entities.get_mut(&entity_id) {
-                let health = entity.add_health(50.0);
-                health.regeneration = -1.0; // Slowly decays
-                
-                let renderer = entity.add_renderer();
-                renderer.color = [1.0, 0.5, 0.0, 1.0]; // Orange
-                renderer.emission = [0.2, 0.1, 0.0]; // Glowing
-                
-                entity.tag = "Interactive".to_string();
-            }
-        }
     }
     
     fn setup_lighting(&mut self) {
-        // Main directional light (sun)
+        // Main directional light
         let main_light = Light {
             position: Vector3::new(CANVAS_WIDTH / 2.0, CANVAS_HEIGHT / 2.0, 1000.0),
             direction: Vector3::new(0.3, -1.0, 0.3).normalize(),
             color: [1.0, 0.95, 0.8],
             intensity: 3.0,
-            range: 0.0, // Infinite range for directional
+            range: 0.0,
             light_type: LightType::Directional,
-            spot_angle: 0.0,
             cast_shadows: true,
             active: true,
         };
         self.lights.push(main_light);
         
-        // Ambient point lights
-        for i in 0..10 {
-            let x = js_sys::Math::random() as f32 * CANVAS_WIDTH;
-            let y = js_sys::Math::random() as f32 * CANVAS_HEIGHT;
-            let z = 50.0 + js_sys::Math::random() as f32 * 200.0;
-            
+        // Add some point lights
+        for _ in 0..5 {
             let point_light = Light {
-                position: Vector3::new(x, y, z),
+                position: Vector3::new(
+                    Math::random() as f32 * CANVAS_WIDTH,
+                    Math::random() as f32 * CANVAS_HEIGHT,
+                    50.0 + Math::random() as f32 * 200.0,
+                ),
                 direction: Vector3::zeros(),
                 color: [
-                    0.5 + js_sys::Math::random() as f32 * 0.5,
-                    0.5 + js_sys::Math::random() as f32 * 0.5,
-                    0.5 + js_sys::Math::random() as f32 * 0.5,
+                    0.5 + Math::random() as f32 * 0.5,
+                    0.5 + Math::random() as f32 * 0.5,
+                    0.5 + Math::random() as f32 * 0.5,
                 ],
-                intensity: 1.0 + js_sys::Math::random() as f32 * 2.0,
-                range: 100.0 + js_sys::Math::random() as f32 * 200.0,
+                intensity: 1.0 + Math::random() as f32 * 2.0,
+                range: 100.0 + Math::random() as f32 * 200.0,
                 light_type: LightType::Point,
-                spot_angle: 0.0,
-                cast_shadows: i < 3, // Only first 3 cast shadows
+                cast_shadows: false,
                 active: true,
             };
             self.lights.push(point_light);
@@ -812,7 +633,7 @@ impl AdvancedGameState {
         let id = self.next_entity_id;
         self.next_entity_id += 1;
         
-        let entity = AdvancedEntity::new(id, name, position);
+        let entity = Entity::new(id, name, position);
         self.entities.insert(id, entity);
         
         id
@@ -825,45 +646,45 @@ impl AdvancedGameState {
         }
         
         let frame_start = now();
-        let mut delta_time = ((current_time - self.last_frame_time) / 1000.0) as f32 * self.time_scale;
-        self.last_frame_time = current_time;
+        let mut delta_time = ((current_time - self.performance.last_frame_time) / 1000.0) as f32 * self.time_scale;
+        self.performance.last_frame_time = current_time;
         
-        // Cap delta time to prevent large jumps
+        // Cap delta time
         if delta_time > 0.033 {
             delta_time = 0.033;
         }
         
         // Update FPS counter
-        self.fps_counter += 1;
-        self.fps_timer += delta_time as f64;
-        if self.fps_timer >= 1.0 {
-            console_log!("FPS: {}, Frame Time: {:.2}ms, Entities: {}, Particles: {}", 
-                        self.fps_counter, self.frame_time_ms, self.entities.len(), self.particle_system.particles.len());
-            self.fps_counter = 0;
-            self.fps_timer = 0.0;
+        self.performance.fps_counter += 1;
+        self.performance.fps_timer += delta_time as f64;
+        if self.performance.fps_timer >= 1.0 {
+            console_log!("FPS: {}, Entities: {}, Particles: {}", 
+                        self.performance.fps_counter, self.entities.len(), self.particle_system.particle_count());
+            self.performance.fps_counter = 0;
+            self.performance.fps_timer = 0.0;
         }
         
-        // Update systems
+        // Update all systems
         self.update_physics_system(delta_time);
         self.update_ai_system(delta_time);
         self.update_health_system(delta_time);
-        self.update_animation_system(delta_time);
         self.particle_system.update(delta_time);
         self.update_camera_system(delta_time);
-        self.update_networking_system();
         
-        // Handle input
+        // Process input
         self.process_input(delta_time);
         
-        // Collision detection and response
-        self.collision_detection_and_response();
+        // Collision detection
+        self.collision_detection();
         
-        // Cleanup inactive entities
-        self.cleanup_inactive_entities();
+        // Cleanup
+        self.cleanup_entities();
         
-        // Calculate frame time
+        // Update performance metrics
         let frame_end = now();
-        self.frame_time_ms = (frame_end - frame_start) as f32;
+        self.performance.frame_time_ms = (frame_end - frame_start) as f32;
+        self.performance.entity_count = self.entities.len();
+        self.performance.particle_count = self.particle_system.particle_count();
     }
     
     fn update_physics_system(&mut self, delta_time: f32) {
@@ -879,7 +700,7 @@ impl AdvancedGameState {
                     continue;
                 }
                 
-                if let Some(physics) = entity.physics.as_mut() {
+                if let Some(physics) = &mut entity.physics {
                     if physics.is_kinematic {
                         continue;
                     }
@@ -892,34 +713,17 @@ impl AdvancedGameState {
                     // Apply drag
                     let speed = physics.velocity.magnitude();
                     if speed > 0.01 {
-                        let drag_force = 0.5 * self.air_density * speed * speed * physics.drag;
+                        let drag_force = 0.5 * 1.225 * speed * speed * physics.drag; // air density
                         let drag_acceleration = -(physics.velocity.normalize() * drag_force) / physics.mass;
                         physics.acceleration += drag_acceleration;
                     }
                     
                     // Integration
                     physics.velocity += physics.acceleration * sub_delta;
-                    
-                    // Apply position constraints
-                    if !physics.freeze_position[0] {
-                        entity.transform.position.x += physics.velocity.x * sub_delta;
-                    }
-                    if !physics.freeze_position[1] {
-                        entity.transform.position.y += physics.velocity.y * sub_delta;
-                    }
-                    if !physics.freeze_position[2] {
-                        entity.transform.position.z += physics.velocity.z * sub_delta;
-                    }
-                    
-                    // Apply rotation constraints and angular physics
-                    if !physics.freeze_rotation[0] || !physics.freeze_rotation[1] || !physics.freeze_rotation[2] {
-                        let angular_quat = UnitQuaternion::from_scaled_axis(physics.angular_velocity * sub_delta);
-                        entity.transform.rotation = entity.transform.rotation * angular_quat;
-                    }
+                    entity.transform.position += physics.velocity * sub_delta;
                     
                     // Apply friction
                     physics.velocity *= 1.0 - (physics.friction * sub_delta);
-                    physics.angular_velocity *= 1.0 - (physics.angular_drag * sub_delta);
                     
                     // Reset acceleration
                     physics.acceleration = Vector3::zeros();
@@ -929,8 +733,10 @@ impl AdvancedGameState {
     }
     
     fn update_ai_system(&mut self, delta_time: f32) {
+        // Collect entity positions for AI decision making
         let entity_positions: HashMap<u32, Vector3<f32>> = self.entities
             .iter()
+            .filter(|(_, e)| e.active)
             .map(|(&id, entity)| (id, entity.transform.position))
             .collect();
         
@@ -939,7 +745,7 @@ impl AdvancedGameState {
                 continue;
             }
             
-            if let Some(ai) = entity.ai.as_mut() {
+            if let Some(ai) = &mut entity.ai {
                 if !ai.enabled {
                     continue;
                 }
@@ -947,39 +753,40 @@ impl AdvancedGameState {
                 ai.decision_timer -= delta_time;
                 
                 if ai.decision_timer <= 0.0 {
-                    ai.decision_timer = 0.5; // Make decisions every 0.5 seconds
+                    ai.decision_timer = 0.5; // Decision interval
                     
-                    match ai.behavior_tree.as_str() {
-                        "wander" => {
+                    match ai.behavior_state {
+                        AIState::Wander => {
                             if ai.path.is_empty() {
-                                // Generate new random target
                                 let target = Vector3::new(
-                                    js_sys::Math::random() as f32 * CANVAS_WIDTH,
-                                    js_sys::Math::random() as f32 * CANVAS_HEIGHT,
+                                    Math::random() as f32 * CANVAS_WIDTH,
+                                    Math::random() as f32 * CANVAS_HEIGHT,
                                     entity.transform.position.z,
                                 );
                                 ai.target_position = Some(target);
                                 ai.path.push_back(target);
                             }
                         }
-                        "seek_player" => {
-                            // Find player entity
-                            if let Some(player_pos) = entity_positions.get(&1) { // Assume player ID is 1
+                        AIState::Seek => {
+                            // Find closest player
+                            if let Some(player_pos) = entity_positions.get(&1) {
                                 ai.target_position = Some(*player_pos);
                                 ai.target_entity = Some(1);
                             }
                         }
-                        _ => {} // Idle or unknown behavior
+                        _ => {}
                     }
                 }
                 
-                // Execute current behavior
+                // Execute behavior
                 if let Some(target) = ai.target_position {
                     let direction = target - entity.transform.position;
-                    if direction.magnitude() > 5.0 {
+                    let distance = direction.magnitude();
+                    
+                    if distance > 5.0 {
                         let move_force = direction.normalize() * 100.0;
                         
-                        if let Some(physics) = entity.physics.as_mut() {
+                        if let Some(physics) = &mut entity.physics {
                             physics.acceleration += move_force / physics.mass;
                         }
                     } else {
@@ -1005,7 +812,7 @@ impl AdvancedGameState {
                 continue;
             }
             
-            if let Some(health) = entity.health.as_mut() {
+            if let Some(health) = &mut entity.health {
                 // Apply regeneration
                 health.current += health.regeneration * delta_time;
                 health.current = health.current.min(health.max).max(0.0);
@@ -1032,33 +839,18 @@ impl AdvancedGameState {
         }
     }
     
-    fn update_animation_system(&mut self, _delta_time: f32) {
-        // Animation system would be implemented here
-        // This would handle skeletal animations, sprite animations, etc.
-    }
-    
     fn update_camera_system(&mut self, delta_time: f32) {
-        if let Some(target_id) = self.camera.target {
+        if let Some(target_id) = self.camera.target_entity {
             if let Some(target_entity) = self.entities.get(&target_id) {
-                self.camera.follow_entity(target_entity, delta_time);
+                self.camera.follow_entity(target_entity.transform.position, delta_time);
             }
         }
     }
     
-    fn update_networking_system(&mut self) {
-        if !self.multiplayer_enabled {
-            return;
-        }
-        
-        // Networking system would be implemented here
-        // This would handle entity synchronization, state updates, etc.
-    }
-    
     fn process_input(&mut self, delta_time: f32) {
         // Find player entity
-        let player_entity = self.entities.get_mut(&1);
-        if let Some(player) = player_entity {
-            if let Some(physics) = player.physics.as_mut() {
+        if let Some(player) = self.entities.get_mut(&1) {
+            if let Some(physics) = &mut player.physics {
                 let move_speed = 300.0;
                 let mut move_direction = Vector3::zeros();
                 
@@ -1076,7 +868,7 @@ impl AdvancedGameState {
                     move_direction.x += 1.0;
                 }
                 
-                // Normalize and apply movement
+                // Normalize and apply
                 if move_direction.magnitude() > 0.0 {
                     move_direction = move_direction.normalize();
                     physics.acceleration += move_direction * move_speed;
@@ -1085,10 +877,7 @@ impl AdvancedGameState {
         }
     }
     
-    fn collision_detection_and_response(&mut self) {
-        // Broad phase collision detection using spatial partitioning would go here
-        // For now, we'll use a simple O(n²) approach
-        
+    fn collision_detection(&mut self) {
         let entity_ids: Vec<u32> = self.entities.keys().cloned().collect();
         
         for i in 0..entity_ids.len() {
@@ -1096,6 +885,7 @@ impl AdvancedGameState {
                 let id_a = entity_ids[i];
                 let id_b = entity_ids[j];
                 
+                // Check collision
                 let collision_data = {
                     let entity_a = &self.entities[&id_a];
                     let entity_b = &self.entities[&id_b];
@@ -1105,261 +895,8 @@ impl AdvancedGameState {
                     }
                     
                     let distance = (entity_a.transform.position - entity_b.transform.position).magnitude();
-                    let collision_threshold = 32.0; // Basic collision radius
+                    let collision_radius = 32.0;
                     
-                    if distance < collision_threshold {
+                    if distance < collision_radius {
                         Some((
-                            id_a, id_b,
-                            entity_a.transform.position,
-                            entity_b.transform.position,
-                            distance,
-                            entity_a.tag.clone(),
-                            entity_b.tag.clone()
-                        ))
-                    } else {
-                        None
-                    }
-                };
-                
-                if let Some((id_a, id_b, pos_a, pos_b, distance, tag_a, tag_b)) = collision_data {
-                    // Handle collision response
-                    let direction = (pos_a - pos_b).normalize();
-                    let overlap = 32.0 - distance;
-                    
-                    // Separate entities
-                    if let Some(entity_a) = self.entities.get_mut(&id_a) {
-                        entity_a.transform.position += direction * overlap * 0.5;
-                        
-                        if let Some(physics_a) = entity_a.physics.as_mut() {
-                            let bounce_force = 150.0;
-                            physics_a.velocity += direction * bounce_force;
-                        }
-                    }
-                    
-                    if let Some(entity_b) = self.entities.get_mut(&id_b) {
-                        entity_b.transform.position -= direction * overlap * 0.5;
-                        
-                        if let Some(physics_b) = entity_b.physics.as_mut() {
-                            let bounce_force = 150.0;
-                            physics_b.velocity -= direction * bounce_force;
-                        }
-                    }
-                    
-                    // Handle specific collision interactions
-                    if tag_a == "Player" || tag_b == "Player" {
-                        self.score += 5;
-                        
-                        // Create particle effect
-                        let effect_pos = (pos_a + pos_b) * 0.5;
-                        self.particle_system.create_explosion(effect_pos, 0.5);
-                    }
-                }
-            }
-        }
-    }
-    
-    fn cleanup_inactive_entities(&mut self) {
-        self.entities.retain(|_, entity| entity.active);
-    }
-    
-    // WASM exports
-    #[wasm_bindgen]
-    pub fn handle_key_event(&mut self, key_code: u32, pressed: bool) {
-        self.input_state.insert(key_code, pressed);
-        
-        if pressed && key_code == 32 { // Space
-            self.paused = !self.paused;
-        }
-    }
-    
-    #[wasm_bindgen]
-    pub fn handle_mouse_event(&mut self, x: f32, y: f32, delta_x: f32, delta_y: f32) {
-        self.mouse_position = Vector3::new(x, y, 0.0);
-        self.mouse_delta = Vector3::new(delta_x, delta_y, 0.0);
-    }
-    
-    #[wasm_bindgen]
-    pub fn get_score(&self) -> i32 {
-        self.score
-    }
-    
-    #[wasm_bindgen]
-    pub fn get_entity_count(&self) -> usize {
-        self.entities.len()
-    }
-    
-    #[wasm_bindgen]
-    pub fn get_particle_count(&self) -> usize {
-        self.particle_system.particles.len()
-    }
-    
-    #[wasm_bindgen]
-    pub fn get_frame_time(&self) -> f32 {
-        self.frame_time_ms
-    }
-    
-    #[wasm_bindgen]
-    pub fn set_graphics_quality(&mut self, quality: u8) {
-        self.graphics_quality = quality;
-        
-        match quality {
-            0 => { // Low
-                self.shadows_enabled = false;
-                self.bloom_enabled = false;
-                self.ssao_enabled = false;
-                self.reflections_enabled = false;
-                self.pbr_enabled = false;
-            }
-            1 => { // Medium
-                self.shadows_enabled = true;
-                self.bloom_enabled = true;
-                self.ssao_enabled = false;
-                self.reflections_enabled = false;
-                self.pbr_enabled = true;
-            }
-            2 => { // High
-                self.shadows_enabled = true;
-                self.bloom_enabled = true;
-                self.ssao_enabled = true;
-                self.reflections_enabled = true;
-                self.pbr_enabled = true;
-            }
-            _ => {}
-        }
-        
-        console_log!("Graphics quality set to {}", quality);
-    }
-    
-    #[wasm_bindgen]
-    pub fn enable_multiplayer(&mut self, server_url: String) {
-        self.server_url = server_url;
-        self.multiplayer_enabled = true;
-        console_log!("Multiplayer enabled, connecting to: {}", self.server_url);
-    }
-    
-    #[wasm_bindgen]
-    pub fn get_entity_data(&self) -> JsValue {
-        let mut data = js_sys::Array::new();
-        
-        for entity in self.entities.values() {
-            if !entity.active {
-                continue;
-            }
-            
-            let entity_data = js_sys::Object::new();
-            js_sys::Reflect::set(&entity_data, &"id".into(), &entity.id.into()).unwrap();
-            js_sys::Reflect::set(&entity_data, &"name".into(), &entity.name.clone().into()).unwrap();
-            js_sys::Reflect::set(&entity_data, &"x".into(), &entity.transform.position.x.into()).unwrap();
-            js_sys::Reflect::set(&entity_data, &"y".into(), &entity.transform.position.y.into()).unwrap();
-            js_sys::Reflect::set(&entity_data, &"z".into(), &entity.transform.position.z.into()).unwrap();
-            
-            data.push(&entity_data);
-        }
-        
-        data.into()
-    }
-    
-    #[wasm_bindgen]
-    pub fn reset_game(&mut self) {
-        console_log!("Resetting advanced game state");
-        self.entities.clear();
-        self.next_entity_id = 1;
-        self.score = 0;
-        self.level = 1;
-        self.paused = false;
-        self.particle_system = ParticleSystem::new();
-        self.initialize_scene();
-    }
-    
-    #[wasm_bindgen]
-    pub fn cleanup(&mut self) {
-        console_log!("Cleaning up Advanced Game Engine v1.12");
-        self.entities.clear();
-        self.particle_system.particles.clear();
-        self.lights.clear();
-    }
-}
-
-// WASM GC utilities
-#[wasm_bindgen]
-pub struct WasmAdvancedGameEngine {
-    game_state: Rc<RefCell<AdvancedGameState>>,
-}
-
-#[wasm_bindgen]
-impl WasmAdvancedGameEngine {
-    #[wasm_bindgen(constructor)]
-    pub fn new() -> WasmAdvancedGameEngine {
-        console_log!("Initializing WASM Advanced Game Engine v1.12");
-        std::panic::set_hook(Box::new(console_error_panic_hook::hook));
-        
-        WasmAdvancedGameEngine {
-            game_state: Rc::new(RefCell::new(AdvancedGameState::new())),
-        }
-    }
-    
-    #[wasm_bindgen]
-    pub fn update_frame(&self, current_time: f64) {
-        self.game_state.borrow_mut().update(current_time);
-    }
-    
-    #[wasm_bindgen]
-    pub fn handle_key(&self, key_code: u32, pressed: bool) {
-        self.game_state.borrow_mut().handle_key_event(key_code, pressed);
-    }
-    
-    #[wasm_bindgen]
-    pub fn handle_mouse(&self, x: f32, y: f32, delta_x: f32, delta_y: f32) {
-        self.game_state.borrow_mut().handle_mouse_event(x, y, delta_x, delta_y);
-    }
-    
-    #[wasm_bindgen]
-    pub fn get_score(&self) -> i32 {
-        self.game_state.borrow().get_score()
-    }
-    
-    #[wasm_bindgen]
-    pub fn get_entity_count(&self) -> usize {
-        self.game_state.borrow().get_entity_count()
-    }
-    
-    #[wasm_bindgen]
-    pub fn get_performance_data(&self) -> JsValue {
-        let state = self.game_state.borrow();
-        let data = js_sys::Object::new();
-        
-        js_sys::Reflect::set(&data, &"frameTime".into(), &state.get_frame_time().into()).unwrap();
-        js_sys::Reflect::set(&data, &"entityCount".into(), &state.get_entity_count().into()).unwrap();
-        js_sys::Reflect::set(&data, &"particleCount".into(), &state.get_particle_count().into()).unwrap();
-        
-        data.into()
-    }
-    
-    #[wasm_bindgen]
-    pub fn set_quality(&self, quality: u8) {
-        self.game_state.borrow_mut().set_graphics_quality(quality);
-    }
-    
-    #[wasm_bindgen]
-    pub fn enable_multiplayer(&self, server_url: String) {
-        self.game_state.borrow_mut().enable_multiplayer(server_url);
-    }
-    
-    #[wasm_bindgen]
-    pub fn reset(&self) {
-        self.game_state.borrow_mut().reset_game();
-    }
-    
-    #[wasm_bindgen]
-    pub fn cleanup(&self) {
-        console_log!("Cleaning up WASM Advanced Game Engine v1.12");
-        self.game_state.borrow_mut().cleanup();
-    }
-}
-
-// Entry point for WASM
-#[wasm_bindgen(start)]
-pub fn main() {
-    console_log!("WASM Advanced Game Engine v1.12 Enhanced Edition loaded successfully!");
-    console_log!("Features: ECS Architecture, Advanced Physics, AI, Networking, PBR Rendering");
-}
+                            entity_a.transform.
