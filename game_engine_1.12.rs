@@ -899,4 +899,161 @@ impl AdvancedGameState {
                     
                     if distance < collision_radius {
                         Some((
-                            entity_a.transform.
+                            entity_a.transform.position,
+                            entity_b.transform.position,
+                            distance,
+                            entity_a.tag.clone(),
+                            entity_b.tag.clone()
+                        ))
+                    } else {
+                        None
+                    }
+                };
+                
+                if let Some((pos_a, pos_b, distance, tag_a, tag_b)) = collision_data {
+                    // Handle collision response
+                    let direction = (pos_a - pos_b).normalize();
+                    let overlap = 32.0 - distance;
+                    
+                    // Separate entities
+                    if let Some(entity_a) = self.entities.get_mut(&id_a) {
+                        entity_a.transform.position += direction * overlap * 0.5;
+                        
+                        if let Some(physics_a) = &mut entity_a.physics {
+                            physics_a.velocity += direction * physics_a.bounciness * 150.0;
+                        }
+                    }
+                    
+                    if let Some(entity_b) = self.entities.get_mut(&id_b) {
+                        entity_b.transform.position -= direction * overlap * 0.5;
+                        
+                        if let Some(physics_b) = &mut entity_b.physics {
+                            physics_b.velocity -= direction * physics_b.bounciness * 150.0;
+                        }
+                    }
+                    
+                    // Handle specific interactions
+                    if tag_a == "Player" || tag_b == "Player" {
+                        self.score += 5;
+                        
+                        // Create collision effect
+                        let effect_pos = (pos_a + pos_b) * 0.5;
+                        self.particle_system.create_explosion(effect_pos, 0.5);
+                    }
+                }
+            }
+        }
+    }
+    
+    fn cleanup_entities(&mut self) {
+        self.entities.retain(|_, entity| entity.active && entity.is_alive());
+    }
+    
+    // === WASM EXPORTS ===
+    
+    #[wasm_bindgen]
+    pub fn handle_key_event(&mut self, key_code: u32, pressed: bool) {
+        self.input_state.insert(key_code, pressed);
+        
+        if pressed && key_code == 32 { // Space
+            self.paused = !self.paused;
+        }
+    }
+    
+    #[wasm_bindgen]
+    pub fn get_score(&self) -> i32 {
+        self.score
+    }
+    
+    #[wasm_bindgen]
+    pub fn get_entity_count(&self) -> usize {
+        self.entities.len()
+    }
+    
+    #[wasm_bindgen]
+    pub fn get_particle_count(&self) -> usize {
+        self.particle_system.particle_count()
+    }
+    
+    #[wasm_bindgen]
+    pub fn get_frame_time(&self) -> f32 {
+        self.performance.frame_time_ms
+    }
+    
+    #[wasm_bindgen]
+    pub fn set_graphics_quality(&mut self, quality: u8) {
+        self.graphics_quality = quality;
+        
+        match quality {
+            0 => { // Low
+                self.shadows_enabled = false;
+                self.bloom_enabled = false;
+                self.pbr_enabled = false;
+            }
+            1 => { // Medium
+                self.shadows_enabled = true;
+                self.bloom_enabled = true;
+                self.pbr_enabled = true;
+            }
+            2 => { // High
+                self.shadows_enabled = true;
+                self.bloom_enabled = true;
+                self.pbr_enabled = true;
+            }
+            _ => {}
+        }
+        
+        console_log!("Graphics quality set to {}", quality);
+    }
+    
+    #[wasm_bindgen]
+    pub fn get_entity_data(&self) -> JsValue {
+        let mut data = js_sys::Array::new();
+        
+        for entity in self.entities.values() {
+            if !entity.active {
+                continue;
+            }
+            
+            let entity_data = js_sys::Object::new();
+            js_sys::Reflect::set(&entity_data, &"id".into(), &entity.id.into()).unwrap();
+            js_sys::Reflect::set(&entity_data, &"name".into(), &entity.name.clone().into()).unwrap();
+            js_sys::Reflect::set(&entity_data, &"x".into(), &entity.transform.position.x.into()).unwrap();
+            js_sys::Reflect::set(&entity_data, &"y".into(), &entity.transform.position.y.into()).unwrap();
+            js_sys::Reflect::set(&entity_data, &"z".into(), &entity.transform.position.z.into()).unwrap();
+            
+            data.push(&entity_data);
+        }
+        
+        data.into()
+    }
+    
+    #[wasm_bindgen]
+    pub fn reset_game(&mut self) {
+        console_log!("Resetting advanced game state");
+        self.entities.clear();
+        self.next_entity_id = 1;
+        self.score = 0;
+        self.level = 1;
+        self.paused = false;
+        self.particle_system = ParticleSystem::new();
+        self.initialize_scene();
+    }
+    
+    #[wasm_bindgen]
+    pub fn cleanup(&mut self) {
+        console_log!("Cleaning up Advanced Game Engine v1.12");
+        self.entities.clear();
+        self.particle_system = ParticleSystem::new();
+        self.lights.clear();
+    }
+}
+
+// === ENTRY POINT ===
+
+#[wasm_bindgen(start)]
+pub fn main() {
+    console_log!("WASM Advanced Game Engine v1.12 Enhanced Edition loaded successfully!");
+    console_log!("Features: ECS Architecture, Advanced Physics, AI, PBR Rendering");
+    std::panic::set_hook(Box::new(console_error_panic_hook::hook));
+}
