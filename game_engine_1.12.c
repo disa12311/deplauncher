@@ -9,297 +9,327 @@
 #include <stdbool.h>
 #include <time.h>
 
-// Advanced Game Engine for Deplauncher 1.12 - Enhanced Edition
-// Cleaned and optimized version with improved architecture
+// Web-Optimized Game Engine for Deplauncher 1.12 - Enhanced Edition
+// Optimized specifically for web browsers with WebGL and Canvas integration
 
-// === CONSTANTS ===
-#define MAX_ENTITIES 5000
-#define MAX_PARTICLES 10000
-#define MAX_LIGHTS 50
+// === WEB-SPECIFIC CONSTANTS ===
+#define MAX_ENTITIES 2000        // Reduced for web performance
+#define MAX_PARTICLES 5000       // Optimized for browser rendering
+#define MAX_LIGHTS 25            // Limited for WebGL performance
 #define CANVAS_WIDTH 1920
 #define CANVAS_HEIGHT 1080
-#define PHYSICS_SUBSTEPS 4
-#define NETWORK_BUFFER_SIZE 8192
-#define ENTITY_NAME_SIZE 64
-#define ENTITY_TAG_SIZE 32
+#define PHYSICS_SUBSTEPS 2       // Reduced for web performance
+#define NETWORK_BUFFER_SIZE 4096 // Optimized for WebSockets
+#define ENTITY_NAME_SIZE 32      // Smaller for memory efficiency
+#define ENTITY_TAG_SIZE 16       // Optimized size
 
-// === CORE STRUCTURES ===
+// Web performance targets
+#define TARGET_FPS 60.0f
+#define MAX_FRAME_TIME_MS 16.67f // 60 FPS target
+#define ADAPTIVE_QUALITY_THRESHOLD 20.0f
 
-// 3D Vector for better code organization
-typedef struct {
+// === CORE STRUCTURES OPTIMIZED FOR WEB ===
+
+// Compact 3D Vector for better cache performance
+typedef struct __attribute__((packed)) {
     float x, y, z;
 } Vector3;
 
-// Transform component
-typedef struct {
+// Web-optimized Transform component
+typedef struct __attribute__((aligned(16))) {
     Vector3 position;
-    Vector3 rotation;
-    Vector3 scale;
     Vector3 velocity;
     Vector3 acceleration;
+    float rotation_y; // Single axis rotation for web performance
+    float scale;      // Uniform scale for simplicity
 } Transform;
 
-// Physics component
+// Simplified Physics for web
 typedef struct {
     float mass;
-    float friction;
-    float bounciness;
     float drag;
-    bool is_kinematic;
-    bool has_gravity;
+    float bounciness;
+    bool is_kinematic : 1;
+    bool has_gravity : 1;
+    bool enabled : 1;
+    char padding : 5; // Bit packing
 } Physics;
 
-// Rendering component
+// Web-optimized Renderer
 typedef struct {
     int texture_id;
-    int normal_map_id;
-    int specular_map_id;
-    float color[4];
-    float metallic;
-    float roughness;
-    bool cast_shadows;
-    bool receive_shadows;
+    float color[4];  // RGBA for WebGL
+    float opacity;
+    bool visible : 1;
+    bool cast_shadows : 1;
+    char render_layer : 6; // 0-63 render layers
 } Renderer;
 
-// Game logic component
+// Compact Game Logic
 typedef struct {
     bool active;
-    int health;
-    int max_health;
-    float energy;
-    float max_energy;
+    short health;      // 16-bit for memory efficiency
+    short max_health;
     char name[ENTITY_NAME_SIZE];
     char tag[ENTITY_TAG_SIZE];
-    int layer;
+    char layer;
 } GameLogic;
 
-// AI component
+// Simple AI for web
 typedef struct {
     int state;
     float timer;
     Vector3 target_position;
-    int target_entity_id;
+    short target_entity_id;
+    char behavior_type; // 0=idle, 1=wander, 2=seek
 } AI;
 
-// Advanced entity with component-based architecture
-typedef struct {
+// Web-optimized Entity (cache-friendly layout)
+typedef struct __attribute__((aligned(64))) {
     Transform transform;
     Physics physics;
     Renderer renderer;
     GameLogic logic;
     AI ai;
-    
-    // Animation system
-    int current_animation;
-    float animation_time;
-    float animation_speed;
-    bool animation_loop;
-    
-    // Networking
-    bool networked;
-    int owner_id;
-    float last_sync_time;
-} AdvancedEntity;
+} WebEntity;
 
-// Particle system
-typedef struct {
+// WebGL-friendly Particle
+typedef struct __attribute__((packed)) {
     Vector3 position;
     Vector3 velocity;
     float color[4];
     float life;
-    float max_life;
     float size;
-    float rotation;
     bool active;
-} Particle;
+} WebParticle;
 
-// Lighting system
-typedef struct {
+// Web-optimized Light
+typedef struct __attribute__((packed)) {
     Vector3 position;
-    Vector3 direction;
     float color[3];
     float intensity;
     float range;
-    int type; // 0=directional, 1=point, 2=spot
-    float spot_angle;
-    bool cast_shadows;
+    char type; // 0=directional, 1=point
     bool active;
-} Light;
+} WebLight;
 
-// Performance metrics
+// Browser performance tracking
 typedef struct {
     double last_frame_time;
+    double frame_accumulator;
     int fps_counter;
-    double fps_timer;
-    float frame_time_ms;
-    int draw_calls;
-} PerformanceMetrics;
+    float current_fps;
+    float average_frame_time_ms;
+    int dropped_frames;
+    bool performance_mode;  // Adaptive quality
+    char quality_level;     // 0=low, 1=medium, 2=high
+} BrowserPerformanceMetrics;
 
-// Graphics settings
+// Web graphics settings
 typedef struct {
-    bool bloom_enabled;
-    bool ssao_enabled;
-    bool motion_blur_enabled;
-    bool pbr_enabled;
-    bool shadows_enabled;
-    int shadow_quality;
-    bool reflections_enabled;
-    float exposure;
-    float gamma;
-} GraphicsSettings;
+    bool webgl2_available;
+    bool hardware_acceleration;
+    bool instanced_rendering;
+    bool vertex_array_objects;
+    int max_texture_size;
+    int max_vertex_attributes;
+    char quality_preset; // Auto-detected quality
+} WebGraphicsCapabilities;
 
-// Camera system
+// Web input state
 typedef struct {
-    Vector3 position;
-    Vector3 rotation;
-    float fov;
-    float near_plane;
-    float far_plane;
-} Camera;
+    bool keys[256];
+    float mouse_x, mouse_y;
+    float mouse_delta_x, mouse_delta_y;
+    bool mouse_buttons[3]; // Left, Right, Middle
+    bool touch_active;
+    float touch_x, touch_y;
+    int touch_count;
+} WebInputState;
 
-// Physics settings
+// Main web game state
 typedef struct {
-    Vector3 gravity;
-    float air_density;
-    bool enabled;
-} PhysicsSettings;
-
-// Audio settings
-typedef struct {
-    float master_volume;
-    float sfx_volume;
-    float music_volume;
-} AudioSettings;
-
-// Network settings
-typedef struct {
-    bool multiplayer_enabled;
-    int player_id;
-    char server_url[256];
-    char buffer[NETWORK_BUFFER_SIZE];
-} NetworkSettings;
-
-// Main game state - better organized
-typedef struct {
-    // Entity system
-    AdvancedEntity entities[MAX_ENTITIES];
+    // Entity system - cache-aligned
+    WebEntity entities[MAX_ENTITIES];
     int entity_count;
     
     // Particle system
-    Particle particles[MAX_PARTICLES];
+    WebParticle particles[MAX_PARTICLES];
     int particle_count;
     
     // Lighting system
-    Light lights[MAX_LIGHTS];
+    WebLight lights[MAX_LIGHTS];
     int light_count;
     
-    // Core systems
-    Camera camera;
-    PhysicsSettings physics;
-    GraphicsSettings graphics;
-    AudioSettings audio;
-    NetworkSettings network;
-    PerformanceMetrics performance;
+    // Web-specific systems
+    BrowserPerformanceMetrics performance;
+    WebGraphicsCapabilities graphics_caps;
+    WebInputState input;
+    
+    // Camera (simplified for web)
+    Vector3 camera_position;
+    Vector3 camera_target;
+    float camera_fov;
+    
+    // Physics world
+    Vector3 gravity;
+    bool physics_enabled;
     
     // Game state
     int score;
     int level;
     float time_scale;
     bool paused;
-} AdvancedGameState;
+    
+    // Web optimization flags
+    bool adaptive_quality;
+    bool vsync_enabled;
+    bool debug_mode;
+} WebGameState;
 
 // === GLOBAL STATE ===
-static AdvancedGameState* g_game_state = NULL;
+static WebGameState* g_game_state = NULL;
 static bool g_initialized = false;
+
+// Performance monitoring
+static float g_frame_budget_ms = MAX_FRAME_TIME_MS;
+static int g_quality_adjustment_cooldown = 0;
 
 // === UTILITY FUNCTIONS ===
 
-// Vector3 operations
+// Optimized Vector3 operations using SIMD-friendly code
 Vector3 vec3_create(float x, float y, float z) {
     Vector3 v = {x, y, z};
     return v;
 }
 
 Vector3 vec3_add(Vector3 a, Vector3 b) {
-    return vec3_create(a.x + b.x, a.y + b.y, a.z + b.z);
-}
-
-Vector3 vec3_subtract(Vector3 a, Vector3 b) {
-    return vec3_create(a.x - b.x, a.y - b.y, a.z - b.z);
+    return (Vector3){a.x + b.x, a.y + b.y, a.z + b.z};
 }
 
 Vector3 vec3_multiply_scalar(Vector3 v, float scalar) {
-    return vec3_create(v.x * scalar, v.y * scalar, v.z * scalar);
+    return (Vector3){v.x * scalar, v.y * scalar, v.z * scalar};
+}
+
+float vec3_magnitude_squared(Vector3 v) {
+    return v.x * v.x + v.y * v.y + v.z * v.z;
 }
 
 float vec3_magnitude(Vector3 v) {
-    return sqrtf(v.x * v.x + v.y * v.y + v.z * v.z);
+    return sqrtf(vec3_magnitude_squared(v));
 }
 
-Vector3 vec3_normalize(Vector3 v) {
-    float mag = vec3_magnitude(v);
-    if (mag > 0.001f) {
-        return vec3_multiply_scalar(v, 1.0f / mag);
+Vector3 vec3_normalize_fast(Vector3 v) {
+    float inv_mag = 1.0f / sqrtf(vec3_magnitude_squared(v) + 1e-6f);
+    return vec3_multiply_scalar(v, inv_mag);
+}
+
+// === WEB-SPECIFIC FUNCTIONS ===
+
+// Detect browser capabilities
+void detect_web_capabilities() {
+    WebGraphicsCapabilities* caps = &g_game_state->graphics_caps;
+    
+    // These would be detected via JavaScript and passed to WASM
+    caps->webgl2_available = true; // Assume modern browser
+    caps->hardware_acceleration = true;
+    caps->instanced_rendering = true;
+    caps->vertex_array_objects = true;
+    caps->max_texture_size = 4096;
+    caps->max_vertex_attributes = 16;
+    caps->quality_preset = 2; // Start with high quality
+}
+
+// Adaptive quality system for web performance
+void update_adaptive_quality(float frame_time_ms) {
+    if (!g_game_state->adaptive_quality) return;
+    
+    BrowserPerformanceMetrics* perf = &g_game_state->performance;
+    
+    // Cooldown to prevent rapid quality changes
+    if (g_quality_adjustment_cooldown > 0) {
+        g_quality_adjustment_cooldown--;
+        return;
     }
-    return vec3_create(0, 0, 0);
+    
+    // Check if we're consistently over budget
+    if (frame_time_ms > g_frame_budget_ms * 1.2f) {
+        if (perf->quality_level > 0) {
+            perf->quality_level--;
+            g_quality_adjustment_cooldown = 60; // 1 second cooldown at 60fps
+            printf("Quality reduced to %d (frame time: %.2fms)\n", 
+                   perf->quality_level, frame_time_ms);
+        }
+    }
+    // Check if we can increase quality
+    else if (frame_time_ms < g_frame_budget_ms * 0.7f) {
+        if (perf->quality_level < 2) {
+            perf->quality_level++;
+            g_quality_adjustment_cooldown = 180; // 3 second cooldown
+            printf("Quality increased to %d (frame time: %.2fms)\n", 
+                   perf->quality_level, frame_time_ms);
+        }
+    }
 }
 
-// === SYSTEM FUNCTIONS ===
+// === MEMORY MANAGEMENT ===
 
-// Memory management
-bool allocate_game_state() {
-    g_game_state = (AdvancedGameState*)calloc(1, sizeof(AdvancedGameState));
-    return g_game_state != NULL;
+bool allocate_web_game_state() {
+    g_game_state = (WebGameState*)aligned_alloc(64, sizeof(WebGameState));
+    if (g_game_state) {
+        memset(g_game_state, 0, sizeof(WebGameState));
+        return true;
+    }
+    return false;
 }
 
-void deallocate_game_state() {
+void deallocate_web_game_state() {
     if (g_game_state) {
         free(g_game_state);
         g_game_state = NULL;
     }
 }
 
-// Entity management
-AdvancedEntity* create_entity(Vector3 position, const char* name) {
+// === ENTITY MANAGEMENT ===
+
+WebEntity* create_web_entity(Vector3 position, const char* name) {
     if (!g_game_state || g_game_state->entity_count >= MAX_ENTITIES) {
         return NULL;
     }
     
-    AdvancedEntity* entity = &g_game_state->entities[g_game_state->entity_count++];
+    WebEntity* entity = &g_game_state->entities[g_game_state->entity_count++];
     
     // Initialize transform
     entity->transform.position = position;
-    entity->transform.rotation = vec3_create(0, 0, 0);
-    entity->transform.scale = vec3_create(1, 1, 1);
     entity->transform.velocity = vec3_create(0, 0, 0);
     entity->transform.acceleration = vec3_create(0, 0, 0);
+    entity->transform.rotation_y = 0.0f;
+    entity->transform.scale = 1.0f;
     
     // Initialize physics
     entity->physics.mass = 1.0f;
-    entity->physics.friction = 0.1f;
+    entity->physics.drag = 0.02f;
     entity->physics.bounciness = 0.5f;
-    entity->physics.drag = 0.01f;
     entity->physics.is_kinematic = false;
     entity->physics.has_gravity = true;
+    entity->physics.enabled = true;
     
     // Initialize renderer
     entity->renderer.texture_id = 0;
-    entity->renderer.normal_map_id = -1;
-    entity->renderer.specular_map_id = -1;
-    entity->renderer.color[0] = entity->renderer.color[1] = entity->renderer.color[2] = entity->renderer.color[3] = 1.0f;
-    entity->renderer.metallic = 0.0f;
-    entity->renderer.roughness = 0.5f;
+    entity->renderer.color[0] = entity->renderer.color[1] = 
+    entity->renderer.color[2] = entity->renderer.color[3] = 1.0f;
+    entity->renderer.opacity = 1.0f;
+    entity->renderer.visible = true;
     entity->renderer.cast_shadows = false;
-    entity->renderer.receive_shadows = true;
+    entity->renderer.render_layer = 0;
     
     // Initialize game logic
     entity->logic.active = true;
     entity->logic.health = 100;
     entity->logic.max_health = 100;
-    entity->logic.energy = 100.0f;
-    entity->logic.max_energy = 100.0f;
     strncpy(entity->logic.name, name, ENTITY_NAME_SIZE - 1);
-    strcpy(entity->logic.tag, "Untagged");
+    entity->logic.name[ENTITY_NAME_SIZE - 1] = '\0';
+    strcpy(entity->logic.tag, "Default");
     entity->logic.layer = 0;
     
     // Initialize AI
@@ -307,405 +337,403 @@ AdvancedEntity* create_entity(Vector3 position, const char* name) {
     entity->ai.timer = 0.0f;
     entity->ai.target_position = vec3_create(0, 0, 0);
     entity->ai.target_entity_id = -1;
-    
-    // Initialize animation
-    entity->current_animation = 0;
-    entity->animation_time = 0.0f;
-    entity->animation_speed = 1.0f;
-    entity->animation_loop = true;
-    
-    // Initialize networking
-    entity->networked = false;
-    entity->owner_id = -1;
-    entity->last_sync_time = 0.0f;
+    entity->ai.behavior_type = 0; // Idle
     
     return entity;
 }
 
-// Physics system
-void update_physics_system(float delta_time) {
-    if (!g_game_state->physics.enabled) return;
+// === WEB-OPTIMIZED SYSTEMS ===
+
+// Physics system optimized for web performance
+void update_web_physics_system(float delta_time) {
+    if (!g_game_state->physics_enabled) return;
     
-    float sub_delta = delta_time / PHYSICS_SUBSTEPS;
+    // Single-step integration for web performance
+    const float sub_delta = delta_time / PHYSICS_SUBSTEPS;
     
     for (int step = 0; step < PHYSICS_SUBSTEPS; step++) {
         for (int i = 0; i < g_game_state->entity_count; i++) {
-            AdvancedEntity* entity = &g_game_state->entities[i];
-            if (!entity->logic.active || entity->physics.is_kinematic) continue;
+            WebEntity* entity = &g_game_state->entities[i];
+            if (!entity->logic.active || entity->physics.is_kinematic || !entity->physics.enabled) {
+                continue;
+            }
+            
+            Transform* transform = &entity->transform;
+            Physics* physics = &entity->physics;
             
             // Apply gravity
-            if (entity->physics.has_gravity) {
-                entity->transform.acceleration = vec3_add(entity->transform.acceleration, g_game_state->physics.gravity);
+            if (physics->has_gravity) {
+                transform->acceleration = vec3_add(transform->acceleration, g_game_state->gravity);
             }
             
-            // Apply drag
-            float speed = vec3_magnitude(entity->transform.velocity);
-            if (speed > 0.01f) {
-                Vector3 drag_direction = vec3_normalize(entity->transform.velocity);
-                float drag_force = 0.5f * g_game_state->physics.air_density * speed * speed * entity->physics.drag;
-                Vector3 drag_acceleration = vec3_multiply_scalar(drag_direction, -drag_force / entity->physics.mass);
-                entity->transform.acceleration = vec3_add(entity->transform.acceleration, drag_acceleration);
-            }
+            // Apply drag (simplified for web)
+            float drag_factor = 1.0f - (physics->drag * sub_delta);
+            transform->velocity = vec3_multiply_scalar(transform->velocity, drag_factor);
             
-            // Integration
-            entity->transform.velocity = vec3_add(entity->transform.velocity, 
-                                                vec3_multiply_scalar(entity->transform.acceleration, sub_delta));
-            entity->transform.position = vec3_add(entity->transform.position, 
-                                                vec3_multiply_scalar(entity->transform.velocity, sub_delta));
-            
-            // Apply friction
-            entity->transform.velocity = vec3_multiply_scalar(entity->transform.velocity, 
-                                                            1.0f - entity->physics.friction * sub_delta);
+            // Verlet integration
+            transform->velocity = vec3_add(transform->velocity, 
+                vec3_multiply_scalar(transform->acceleration, sub_delta));
+            transform->position = vec3_add(transform->position, 
+                vec3_multiply_scalar(transform->velocity, sub_delta));
             
             // Reset acceleration
-            entity->transform.acceleration = vec3_create(0, 0, 0);
+            transform->acceleration = vec3_create(0, 0, 0);
         }
     }
 }
 
-// Particle system
-void init_particle_system() {
-    g_game_state->particle_count = 0;
-    memset(g_game_state->particles, 0, sizeof(g_game_state->particles));
-}
-
-void create_particle_explosion(Vector3 position, int count) {
-    for (int i = 0; i < count && g_game_state->particle_count < MAX_PARTICLES; i++) {
-        Particle* p = &g_game_state->particles[g_game_state->particle_count++];
-        
-        // Random explosion direction
-        float angle_xz = ((float)rand() / RAND_MAX) * 2.0f * M_PI;
-        float angle_y = ((float)rand() / RAND_MAX) * M_PI - M_PI / 2.0f;
-        float speed = 100.0f + ((float)rand() / RAND_MAX) * 200.0f;
-        
-        p->position = position;
-        p->velocity = vec3_create(
-            cosf(angle_xz) * cosf(angle_y) * speed,
-            sinf(angle_y) * speed,
-            sinf(angle_xz) * cosf(angle_y) * speed
-        );
-        
-        p->color[0] = 1.0f;
-        p->color[1] = 0.5f + ((float)rand() / RAND_MAX) * 0.5f;
-        p->color[2] = 0.0f;
-        p->color[3] = 1.0f;
-        
-        p->life = p->max_life = 1.0f + ((float)rand() / RAND_MAX) * 2.0f;
-        p->size = 2.0f + ((float)rand() / RAND_MAX) * 4.0f;
-        p->rotation = 0.0f;
-        p->active = true;
-    }
-}
-
-void update_particle_system(float delta_time) {
+// Web-optimized particle system
+void update_web_particle_system(float delta_time) {
+    int active_particles = 0;
+    
     for (int i = 0; i < g_game_state->particle_count; i++) {
-        Particle* p = &g_game_state->particles[i];
+        WebParticle* p = &g_game_state->particles[i];
         if (!p->active) continue;
         
         // Update physics
-        p->velocity = vec3_add(p->velocity, vec3_multiply_scalar(g_game_state->physics.gravity, delta_time));
+        p->velocity = vec3_add(p->velocity, vec3_multiply_scalar(g_game_state->gravity, delta_time));
         p->position = vec3_add(p->position, vec3_multiply_scalar(p->velocity, delta_time));
-        p->rotation += delta_time * 180.0f;
         
         // Update life
         p->life -= delta_time;
         if (p->life <= 0.0f) {
             p->active = false;
+            continue;
         }
         
-        // Update appearance based on life
-        float life_ratio = p->life / p->max_life;
-        p->color[3] = life_ratio;
-        p->size *= 0.995f;
+        // Update visual properties
+        float life_ratio = p->life / 2.0f; // Assume 2s max life
+        p->color[3] = life_ratio; // Alpha fade
+        p->size *= 0.99f; // Size decay
+        
+        active_particles++;
     }
     
-    // Cleanup inactive particles
-    int write_index = 0;
-    for (int read_index = 0; read_index < g_game_state->particle_count; read_index++) {
-        if (g_game_state->particles[read_index].active) {
-            if (write_index != read_index) {
-                g_game_state->particles[write_index] = g_game_state->particles[read_index];
+    // Compact particle array if needed (every 60 frames)
+    static int compact_counter = 0;
+    if (++compact_counter >= 60) {
+        compact_counter = 0;
+        
+        int write_index = 0;
+        for (int read_index = 0; read_index < g_game_state->particle_count; read_index++) {
+            if (g_game_state->particles[read_index].active) {
+                if (write_index != read_index) {
+                    g_game_state->particles[write_index] = g_game_state->particles[read_index];
+                }
+                write_index++;
             }
-            write_index++;
         }
+        g_game_state->particle_count = write_index;
     }
-    g_game_state->particle_count = write_index;
 }
 
-// AI system
-void update_ai_system(float delta_time) {
+// Efficient collision detection for web
+void update_web_collision_system() {
+    // Simple spatial grid for better performance
+    const int GRID_SIZE = 8;
+    const float CELL_SIZE = CANVAS_WIDTH / GRID_SIZE;
+    static int grid[GRID_SIZE][GRID_SIZE][16]; // Max 16 entities per cell
+    static int grid_counts[GRID_SIZE][GRID_SIZE];
+    
+    // Clear grid
+    memset(grid_counts, 0, sizeof(grid_counts));
+    
+    // Populate grid
     for (int i = 0; i < g_game_state->entity_count; i++) {
-        AdvancedEntity* entity = &g_game_state->entities[i];
+        WebEntity* entity = &g_game_state->entities[i];
         if (!entity->logic.active) continue;
         
-        entity->ai.timer -= delta_time;
+        int grid_x = (int)(entity->transform.position.x / CELL_SIZE);
+        int grid_y = (int)(entity->transform.position.y / CELL_SIZE);
         
-        if (entity->ai.timer <= 0.0f) {
-            entity->ai.timer = 0.5f; // Decision every 0.5 seconds
-            
-            // Simple AI behaviors
-            if (strcmp(entity->logic.tag, "Environment") == 0) {
-                // Wander behavior
-                entity->ai.target_position = vec3_create(
-                    ((float)rand() / RAND_MAX) * CANVAS_WIDTH,
-                    ((float)rand() / RAND_MAX) * CANVAS_HEIGHT,
-                    entity->transform.position.z
-                );
-            }
-        }
+        // Clamp to grid bounds
+        grid_x = (grid_x < 0) ? 0 : (grid_x >= GRID_SIZE) ? GRID_SIZE-1 : grid_x;
+        grid_y = (grid_y < 0) ? 0 : (grid_y >= GRID_SIZE) ? GRID_SIZE-1 : grid_y;
         
-        // Execute AI behavior
-        Vector3 direction = vec3_subtract(entity->ai.target_position, entity->transform.position);
-        float distance = vec3_magnitude(direction);
-        
-        if (distance > 5.0f) {
-            Vector3 move_force = vec3_multiply_scalar(vec3_normalize(direction), 100.0f);
-            entity->transform.acceleration = vec3_add(entity->transform.acceleration, 
-                                                    vec3_multiply_scalar(move_force, 1.0f / entity->physics.mass));
+        if (grid_counts[grid_x][grid_y] < 16) {
+            grid[grid_x][grid_y][grid_counts[grid_x][grid_y]++] = i;
         }
     }
-}
-
-// Collision detection
-void update_collision_system() {
-    for (int i = 0; i < g_game_state->entity_count; i++) {
-        for (int j = i + 1; j < g_game_state->entity_count; j++) {
-            AdvancedEntity* a = &g_game_state->entities[i];
-            AdvancedEntity* b = &g_game_state->entities[j];
+    
+    // Check collisions within grid cells
+    for (int gx = 0; gx < GRID_SIZE; gx++) {
+        for (int gy = 0; gy < GRID_SIZE; gy++) {
+            int count = grid_counts[gx][gy];
             
-            if (!a->logic.active || !b->logic.active) continue;
-            
-            Vector3 direction = vec3_subtract(a->transform.position, b->transform.position);
-            float distance = vec3_magnitude(direction);
-            
-            if (distance < 32.0f) { // Collision threshold
-                // Separation
-                float overlap = 32.0f - distance;
-                Vector3 separation = vec3_multiply_scalar(vec3_normalize(direction), overlap * 0.5f);
-                
-                a->transform.position = vec3_add(a->transform.position, separation);
-                b->transform.position = vec3_subtract(b->transform.position, separation);
-                
-                // Collision response
-                float bounce_force = 150.0f * (a->physics.bounciness + b->physics.bounciness) * 0.5f;
-                Vector3 bounce_impulse = vec3_multiply_scalar(vec3_normalize(direction), bounce_force);
-                
-                a->transform.velocity = vec3_add(a->transform.velocity, bounce_impulse);
-                b->transform.velocity = vec3_subtract(b->transform.velocity, bounce_impulse);
-                
-                // Create particle effect
-                Vector3 collision_point = vec3_multiply_scalar(vec3_add(a->transform.position, b->transform.position), 0.5f);
-                create_particle_explosion(collision_point, 3);
-                
-                // Update score
-                if (strcmp(a->logic.tag, "Player") == 0 || strcmp(b->logic.tag, "Player") == 0) {
-                    g_game_state->score += 5;
+            for (int i = 0; i < count; i++) {
+                for (int j = i + 1; j < count; j++) {
+                    int idx_a = grid[gx][gy][i];
+                    int idx_b = grid[gx][gy][j];
+                    
+                    WebEntity* a = &g_game_state->entities[idx_a];
+                    WebEntity* b = &g_game_state->entities[idx_b];
+                    
+                    Vector3 diff = vec3_add(a->transform.position, 
+                        vec3_multiply_scalar(b->transform.position, -1.0f));
+                    float dist_sq = vec3_magnitude_squared(diff);
+                    
+                    if (dist_sq < (32.0f * 32.0f)) { // Collision threshold
+                        // Simple collision response
+                        float bounce = 150.0f * (a->physics.bounciness + b->physics.bounciness) * 0.5f;
+                        Vector3 normal = vec3_normalize_fast(diff);
+                        Vector3 impulse = vec3_multiply_scalar(normal, bounce);
+                        
+                        a->transform.velocity = vec3_add(a->transform.velocity, impulse);
+                        b->transform.velocity = vec3_add(b->transform.velocity, 
+                            vec3_multiply_scalar(impulse, -1.0f));
+                        
+                        // Update score for player collisions
+                        if (strcmp(a->logic.tag, "Player") == 0 || 
+                            strcmp(b->logic.tag, "Player") == 0) {
+                            g_game_state->score += 5;
+                        }
+                    }
                 }
             }
         }
     }
 }
 
-// Cleanup system
-void cleanup_entities() {
-    int write_index = 0;
-    for (int read_index = 0; read_index < g_game_state->entity_count; read_index++) {
-        if (g_game_state->entities[read_index].logic.active) {
-            if (write_index != read_index) {
-                g_game_state->entities[write_index] = g_game_state->entities[read_index];
-            }
-            write_index++;
+// === WEB INPUT HANDLING ===
+
+void process_web_input(float delta_time) {
+    WebEntity* player = NULL;
+    
+    // Find player entity
+    for (int i = 0; i < g_game_state->entity_count; i++) {
+        if (strcmp(g_game_state->entities[i].logic.tag, "Player") == 0) {
+            player = &g_game_state->entities[i];
+            break;
         }
     }
-    g_game_state->entity_count = write_index;
+    
+    if (!player) return;
+    
+    WebInputState* input = &g_game_state->input;
+    float move_speed = 400.0f; // Increased for web responsiveness
+    
+    Vector3 movement = vec3_create(0, 0, 0);
+    
+    // WASD movement
+    if (input->keys[87]) movement.y -= 1.0f; // W
+    if (input->keys[83]) movement.y += 1.0f; // S  
+    if (input->keys[65]) movement.x -= 1.0f; // A
+    if (input->keys[68]) movement.x += 1.0f; // D
+    
+    // Normalize diagonal movement
+    float move_mag = vec3_magnitude(movement);
+    if (move_mag > 0.1f) {
+        movement = vec3_multiply_scalar(movement, move_speed / move_mag);
+        player->transform.acceleration = vec3_add(player->transform.acceleration, movement);
+    }
+    
+    // Touch input for mobile
+    if (input->touch_active && input->touch_count > 0) {
+        Vector3 touch_dir = vec3_create(
+            input->touch_x - player->transform.position.x,
+            input->touch_y - player->transform.position.y,
+            0
+        );
+        
+        float touch_dist = vec3_magnitude(touch_dir);
+        if (touch_dist > 32.0f) { // Dead zone
+            touch_dir = vec3_normalize_fast(touch_dir);
+            Vector3 touch_force = vec3_multiply_scalar(touch_dir, move_speed * 0.5f);
+            player->transform.acceleration = vec3_add(player->transform.acceleration, touch_force);
+        }
+    }
 }
 
-// === MAIN SYSTEMS ===
+// === MAIN INITIALIZATION ===
 
-// Initialization
-void init_advanced_engine() {
-    if (!allocate_game_state()) {
-        printf("Failed to allocate game state memory\n");
+void init_web_game_engine() {
+    if (!allocate_web_game_state()) {
+        printf("Failed to allocate web game state\n");
         return;
     }
     
+    // Detect browser capabilities
+    detect_web_capabilities();
+    
     // Initialize camera
-    g_game_state->camera.position = vec3_create(CANVAS_WIDTH / 2.0f, CANVAS_HEIGHT / 2.0f, -500.0f);
-    g_game_state->camera.rotation = vec3_create(0, 0, 0);
-    g_game_state->camera.fov = 75.0f;
-    g_game_state->camera.near_plane = 0.1f;
-    g_game_state->camera.far_plane = 1000.0f;
+    g_game_state->camera_position = vec3_create(CANVAS_WIDTH/2, CANVAS_HEIGHT/2, -500);
+    g_game_state->camera_target = vec3_create(CANVAS_WIDTH/2, CANVAS_HEIGHT/2, 0);
+    g_game_state->camera_fov = 75.0f;
     
     // Initialize physics
-    g_game_state->physics.gravity = vec3_create(0.0f, -980.0f, 0.0f);
-    g_game_state->physics.air_density = 1.225f;
-    g_game_state->physics.enabled = true;
-    
-    // Initialize graphics settings
-    g_game_state->graphics.bloom_enabled = true;
-    g_game_state->graphics.ssao_enabled = true;
-    g_game_state->graphics.motion_blur_enabled = false;
-    g_game_state->graphics.pbr_enabled = true;
-    g_game_state->graphics.shadows_enabled = true;
-    g_game_state->graphics.shadow_quality = 2;
-    g_game_state->graphics.reflections_enabled = true;
-    g_game_state->graphics.exposure = 1.0f;
-    g_game_state->graphics.gamma = 2.2f;
-    
-    // Initialize audio
-    g_game_state->audio.master_volume = 1.0f;
-    g_game_state->audio.sfx_volume = 0.8f;
-    g_game_state->audio.music_volume = 0.6f;
-    
-    // Initialize networking
-    g_game_state->network.multiplayer_enabled = false;
-    g_game_state->network.player_id = 0;
-    strcpy(g_game_state->network.server_url, "");
+    g_game_state->gravity = vec3_create(0, -490, 0); // Reduced gravity for web
+    g_game_state->physics_enabled = true;
     
     // Initialize game state
     g_game_state->score = 0;
     g_game_state->level = 1;
     g_game_state->time_scale = 1.0f;
     g_game_state->paused = false;
+    g_game_state->adaptive_quality = true;
+    g_game_state->vsync_enabled = true;
+    
+    // Initialize performance tracking
     g_game_state->performance.last_frame_time = emscripten_get_now();
+    g_game_state->performance.quality_level = 2; // Start with high quality
     
-    // Initialize particle system
-    init_particle_system();
-    
-    // Create player entity
-    AdvancedEntity* player = create_entity(vec3_create(CANVAS_WIDTH / 2.0f, CANVAS_HEIGHT / 2.0f, 0.0f), "Player");
+    // Create player
+    WebEntity* player = create_web_entity(
+        vec3_create(CANVAS_WIDTH/2, CANVAS_HEIGHT/2, 0), "Player");
     if (player) {
         player->physics.has_gravity = false; // Top-down view
         strcpy(player->logic.tag, "Player");
-        player->renderer.cast_shadows = true;
-        player->renderer.color[0] = 0.2f;
+        player->renderer.color[0] = 0.3f;
         player->renderer.color[1] = 0.8f;
         player->renderer.color[2] = 1.0f;
     }
     
-    // Create environment entities
-    for (int i = 0; i < 50; i++) {
+    // Create environment entities (reduced count for web)
+    for (int i = 0; i < 30; i++) {
         Vector3 pos = vec3_create(
             (float)(rand() % (int)CANVAS_WIDTH),
             (float)(rand() % (int)CANVAS_HEIGHT),
-            ((float)(rand() % 200) - 100)
+            0
         );
         
-        AdvancedEntity* env = create_entity(pos, "Environment");
+        WebEntity* env = create_web_entity(pos, "Environment");
         if (env) {
             snprintf(env->logic.name, ENTITY_NAME_SIZE, "Obj_%d", i);
-            env->physics.mass = 0.5f + ((float)rand() / RAND_MAX) * 2.0f;
-            env->renderer.metallic = (float)rand() / RAND_MAX;
-            env->renderer.roughness = 0.2f + ((float)rand() / RAND_MAX) * 0.8f;
+            strcpy(env->logic.tag, "Environment");
+            env->physics.mass = 0.5f + ((float)rand() / RAND_MAX) * 1.5f;
             env->renderer.color[0] = 0.5f + ((float)rand() / RAND_MAX) * 0.5f;
             env->renderer.color[1] = 0.5f + ((float)rand() / RAND_MAX) * 0.5f;
             env->renderer.color[2] = 0.5f + ((float)rand() / RAND_MAX) * 0.5f;
-            strcpy(env->logic.tag, "Environment");
         }
     }
     
     g_initialized = true;
-    printf("Advanced Game Engine v1.12 initialized successfully\n");
+    printf("Web Game Engine v1.12 initialized successfully\n");
+    printf("WebGL2: %s, Hardware Accel: %s\n",
+           g_game_state->graphics_caps.webgl2_available ? "Yes" : "No",
+           g_game_state->graphics_caps.hardware_acceleration ? "Yes" : "No");
     printf("Entities: %d\n", g_game_state->entity_count);
 }
 
-// Main update function
-void update_advanced_game_logic(double current_time) {
+// === MAIN UPDATE LOOP ===
+
+void update_web_game_logic(double current_time) {
     if (g_game_state->paused) return;
     
     double frame_start = emscripten_get_now();
-    float delta_time = (float)(current_time - g_game_state->performance.last_frame_time) / 1000.0f * g_game_state->time_scale;
-    g_game_state->performance.last_frame_time = current_time;
+    BrowserPerformanceMetrics* perf = &g_game_state->performance;
+    
+    float delta_time = (float)(current_time - perf->last_frame_time) / 1000.0f * g_game_state->time_scale;
+    perf->last_frame_time = current_time;
     
     // Cap delta time
     if (delta_time > 0.033f) delta_time = 0.033f;
     
-    // Update FPS counter
-    g_game_state->performance.fps_counter++;
-    g_game_state->performance.fps_timer += delta_time;
-    if (g_game_state->performance.fps_timer >= 1.0) {
-        printf("FPS: %d, Frame Time: %.2fms\n", 
-               g_game_state->performance.fps_counter, g_game_state->performance.frame_time_ms);
-        g_game_state->performance.fps_counter = 0;
-        g_game_state->performance.fps_timer = 0.0;
+    // Update FPS tracking
+    perf->fps_counter++;
+    perf->frame_accumulator += delta_time;
+    if (perf->frame_accumulator >= 1.0) {
+        perf->current_fps = perf->fps_counter / perf->frame_accumulator;
+        perf->fps_counter = 0;
+        perf->frame_accumulator = 0.0;
+        
+        if (g_game_state->debug_mode) {
+            printf("FPS: %.1f, Frame: %.2fms, Quality: %d\n", 
+                   perf->current_fps, perf->average_frame_time_ms, perf->quality_level);
+        }
     }
     
-    // Update all systems
-    update_physics_system(delta_time);
-    update_ai_system(delta_time);
-    update_particle_system(delta_time);
-    update_collision_system();
-    cleanup_entities();
-    
-    // Update camera to follow player
-    if (g_game_state->entity_count > 0) {
-        AdvancedEntity* player = &g_game_state->entities[0];
-        float lerp_speed = 5.0f * delta_time;
-        g_game_state->camera.position.x += (player->transform.position.x - g_game_state->camera.position.x) * lerp_speed;
-        g_game_state->camera.position.y += (player->transform.position.y - g_game_state->camera.position.y) * lerp_speed;
+    // Update systems based on quality level
+    if (perf->quality_level >= 1) {
+        update_web_physics_system(delta_time);
+        update_web_collision_system();
     }
     
-    // Calculate frame time
+    if (perf->quality_level >= 2) {
+        update_web_particle_system(delta_time);
+    }
+    
+    // Always update input and basic entity logic
+    process_web_input(delta_time);
+    
+    // Update camera to follow player smoothly
+    WebEntity* player = &g_game_state->entities[0];
+    if (player && player->logic.active) {
+        float lerp_factor = 3.0f * delta_time;
+        g_game_state->camera_target.x += (player->transform.position.x - g_game_state->camera_target.x) * lerp_factor;
+        g_game_state->camera_target.y += (player->transform.position.y - g_game_state->camera_target.y) * lerp_factor;
+    }
+    
+    // Calculate frame time and adjust quality
     double frame_end = emscripten_get_now();
-    g_game_state->performance.frame_time_ms = (float)(frame_end - frame_start);
+    float frame_time_ms = (float)(frame_end - frame_start);
+    perf->average_frame_time_ms = perf->average_frame_time_ms * 0.9f + frame_time_ms * 0.1f;
+    
+    update_adaptive_quality(frame_time_ms);
 }
 
-// Input handling
-void handle_advanced_input(int key_code, bool pressed) {
-    if (g_game_state->entity_count == 0) return;
+// === WASM EXPORTS FOR WEB ===
+
+EMSCRIPTEN_KEEPALIVE
+int wasm_init_web_game() {
+    printf("Initializing Web Game Engine v1.12\n");
+    init_web_game_engine();
+    return g_initialized ? 1 : 0;
+}
+
+EMSCRIPTEN_KEEPALIVE
+void wasm_update_web_frame(double current_time) {
+    if (!g_initialized || !g_game_state) return;
+    update_web_game_logic(current_time);
+}
+
+EMSCRIPTEN_KEEPALIVE
+void wasm_handle_web_key(int key_code, int pressed) {
+    if (!g_initialized || !g_game_state) return;
     
-    AdvancedEntity* player = &g_game_state->entities[0];
-    float move_speed = 300.0f;
+    if (key_code >= 0 && key_code < 256) {
+        g_game_state->input.keys[key_code] = (pressed != 0);
+    }
     
+    // Special keys
     if (pressed) {
         switch (key_code) {
-            case 87: // W
-                player->transform.acceleration.y -= move_speed;
-                break;
-            case 83: // S
-                player->transform.acceleration.y += move_speed;
-                break;
-            case 65: // A
-                player->transform.acceleration.x -= move_speed;
-                break;
-            case 68: // D
-                player->transform.acceleration.x += move_speed;
-                break;
             case 32: // Space
                 g_game_state->paused = !g_game_state->paused;
+                break;
+            case 192: // Tilde (~) for debug
+                g_game_state->debug_mode = !g_game_state->debug_mode;
                 break;
         }
     }
 }
 
-// === WASM EXPORTS ===
-
 EMSCRIPTEN_KEEPALIVE
-int wasm_init_advanced_game() {
-    printf("Initializing Advanced Game Engine v1.12 Enhanced Edition\n");
-    init_advanced_engine();
-    return g_initialized ? 1 : 0;
+void wasm_handle_mouse(float x, float y, float delta_x, float delta_y) {
+    if (!g_game_state) return;
+    
+    g_game_state->input.mouse_x = x;
+    g_game_state->input.mouse_y = y;
+    g_game_state->input.mouse_delta_x = delta_x;
+    g_game_state->input.mouse_delta_y = delta_y;
 }
 
 EMSCRIPTEN_KEEPALIVE
-void wasm_update_advanced_frame(double current_time) {
-    if (!g_initialized || !g_game_state) return;
-    update_advanced_game_logic(current_time);
+void wasm_handle_touch(float x, float y, int active, int count) {
+    if (!g_game_state) return;
+    
+    g_game_state->input.touch_x = x;
+    g_game_state->input.touch_y = y;
+    g_game_state->input.touch_active = (active != 0);
+    g_game_state->input.touch_count = count;
 }
 
 EMSCRIPTEN_KEEPALIVE
-void wasm_handle_advanced_key(int key_code, int pressed) {
-    if (!g_initialized) return;
-    handle_advanced_input(key_code, pressed == 1);
-}
-
-EMSCRIPTEN_KEEPALIVE
-int wasm_get_advanced_score() {
+int wasm_get_score() {
     return g_game_state ? g_game_state->score : 0;
 }
 
 EMSCRIPTEN_KEEPALIVE
-int wasm_get_advanced_entity_count() {
+int wasm_get_entity_count() {
     return g_game_state ? g_game_state->entity_count : 0;
 }
 
@@ -715,50 +743,17 @@ int wasm_get_particle_count() {
 }
 
 EMSCRIPTEN_KEEPALIVE
+float wasm_get_fps() {
+    return g_game_state ? g_game_state->performance.current_fps : 0.0f;
+}
+
+EMSCRIPTEN_KEEPALIVE
 float wasm_get_frame_time() {
-    return g_game_state ? g_game_state->performance.frame_time_ms : 0.0f;
+    return g_game_state ? g_game_state->performance.average_frame_time_ms : 0.0f;
 }
 
 EMSCRIPTEN_KEEPALIVE
-void wasm_set_graphics_quality(int quality) {
+void wasm_set_quality(int quality) {
     if (!g_game_state) return;
     
-    switch (quality) {
-        case 0: // Low
-            g_game_state->graphics.shadow_quality = 0;
-            g_game_state->graphics.bloom_enabled = false;
-            g_game_state->graphics.ssao_enabled = false;
-            g_game_state->graphics.pbr_enabled = false;
-            break;
-        case 1: // Medium
-            g_game_state->graphics.shadow_quality = 1;
-            g_game_state->graphics.bloom_enabled = true;
-            g_game_state->graphics.ssao_enabled = false;
-            g_game_state->graphics.pbr_enabled = true;
-            break;
-        case 2: // High
-            g_game_state->graphics.shadow_quality = 2;
-            g_game_state->graphics.bloom_enabled = true;
-            g_game_state->graphics.ssao_enabled = true;
-            g_game_state->graphics.pbr_enabled = true;
-            g_game_state->graphics.reflections_enabled = true;
-            break;
-    }
-    printf("Graphics quality set to %d\n", quality);
-}
-
-EMSCRIPTEN_KEEPALIVE
-void wasm_enable_multiplayer(const char* server_url) {
-    if (!g_game_state) return;
-    
-    strncpy(g_game_state->network.server_url, server_url, sizeof(g_game_state->network.server_url) - 1);
-    g_game_state->network.multiplayer_enabled = true;
-    printf("Multiplayer enabled, connecting to: %s\n", server_url);
-}
-
-EMSCRIPTEN_KEEPALIVE
-void wasm_cleanup_advanced() {
-    printf("Advanced Game Engine v1.12 cleaned up\n");
-    deallocate_game_state();
-    g_initialized = false;
-}
+    g_game_state->performance.quality_level = (quality < 0) ? 0 : (quality > 2
