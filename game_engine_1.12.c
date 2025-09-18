@@ -756,4 +756,228 @@ EMSCRIPTEN_KEEPALIVE
 void wasm_set_quality(int quality) {
     if (!g_game_state) return;
     
-    g_game_state->performance.quality_level = (quality < 0) ? 0 : (quality > 2
+    g_game_state->performance.quality_level = (quality < 0) ? 0 : (quality > 2) ? 2 : quality;
+    g_game_state->adaptive_quality = false; // Disable auto adjustment
+    printf("Quality manually set to %d\n", g_game_state->performance.quality_level);
+}
+
+EMSCRIPTEN_KEEPALIVE
+void wasm_enable_adaptive_quality(int enabled) {
+    if (!g_game_state) return;
+    g_game_state->adaptive_quality = (enabled != 0);
+}
+
+// Export render data for WebGL
+EMSCRIPTEN_KEEPALIVE
+float* wasm_get_render_data() {
+    if (!g_game_state) return NULL;
+    
+    static float render_buffer[MAX_ENTITIES * 16]; // Transform matrix per entity
+    int buffer_index = 0;
+    
+    for (int i = 0; i < g_game_state->entity_count; i++) {
+        WebEntity* entity = &g_game_state->entities[i];
+        if (!entity->logic.active || !entity->renderer.visible) continue;
+        
+        Transform* t = &entity->transform;
+        
+        // Create transform matrix (simplified for web)
+        render_buffer[buffer_index++] = t->scale; // Scale X
+        render_buffer[buffer_index++] = 0.0f;     // 
+        render_buffer[buffer_index++] = 0.0f;     //
+        render_buffer[buffer_index++] = t->position.x; // Translation X
+        
+        render_buffer[buffer_index++] = 0.0f;     //
+        render_buffer[buffer_index++] = t->scale; // Scale Y
+        render_buffer[buffer_index++] = 0.0f;     //
+        render_buffer[buffer_index++] = t->position.y; // Translation Y
+        
+        render_buffer[buffer_index++] = 0.0f;     //
+        render_buffer[buffer_index++] = 0.0f;     //
+        render_buffer[buffer_index++] = t->scale; // Scale Z
+        render_buffer[buffer_index++] = t->position.z; // Translation Z
+        
+        render_buffer[buffer_index++] = entity->renderer.color[0]; // Color R
+        render_buffer[buffer_index++] = entity->renderer.color[1]; // Color G
+        render_buffer[buffer_index++] = entity->renderer.color[2]; // Color B
+        render_buffer[buffer_index++] = entity->renderer.color[3] * entity->renderer.opacity; // Alpha
+        
+        if (buffer_index >= MAX_ENTITIES * 16 - 16) break; // Safety check
+    }
+    
+    return render_buffer;
+}
+
+EMSCRIPTEN_KEEPALIVE
+float* wasm_get_particle_data() {
+    if (!g_game_state) return NULL;
+    
+    static float particle_buffer[MAX_PARTICLES * 8]; // Position + Color + Size per particle
+    int buffer_index = 0;
+    
+    for (int i = 0; i < g_game_state->particle_count; i++) {
+        WebParticle* p = &g_game_state->particles[i];
+        if (!p->active) continue;
+        
+        particle_buffer[buffer_index++] = p->position.x;
+        particle_buffer[buffer_index++] = p->position.y;
+        particle_buffer[buffer_index++] = p->position.z;
+        particle_buffer[buffer_index++] = p->size;
+        particle_buffer[buffer_index++] = p->color[0];
+        particle_buffer[buffer_index++] = p->color[1];
+        particle_buffer[buffer_index++] = p->color[2];
+        particle_buffer[buffer_index++] = p->color[3];
+        
+        if (buffer_index >= MAX_PARTICLES * 8 - 8) break; // Safety check
+    }
+    
+    return particle_buffer;
+}
+
+EMSCRIPTEN_KEEPALIVE
+float* wasm_get_camera_data() {
+    if (!g_game_state) return NULL;
+    
+    static float camera_buffer[7];
+    camera_buffer[0] = g_game_state->camera_position.x;
+    camera_buffer[1] = g_game_state->camera_position.y;
+    camera_buffer[2] = g_game_state->camera_position.z;
+    camera_buffer[3] = g_game_state->camera_target.x;
+    camera_buffer[4] = g_game_state->camera_target.y;
+    camera_buffer[5] = g_game_state->camera_target.z;
+    camera_buffer[6] = g_game_state->camera_fov;
+    
+    return camera_buffer;
+}
+
+EMSCRIPTEN_KEEPALIVE
+void wasm_create_explosion(float x, float y, float z, int count) {
+    if (!g_game_state) return;
+    
+    count = (count > 50) ? 50 : count; // Limit for web performance
+    
+    for (int i = 0; i < count && g_game_state->particle_count < MAX_PARTICLES; i++) {
+        WebParticle* p = &g_game_state->particles[g_game_state->particle_count++];
+        
+        // Random explosion direction
+        float angle_xz = ((float)rand() / RAND_MAX) * 2.0f * M_PI;
+        float angle_y = ((float)rand() / RAND_MAX) * M_PI - M_PI / 2.0f;
+        float speed = 80.0f + ((float)rand() / RAND_MAX) * 120.0f;
+        
+        p->position = vec3_create(x, y, z);
+        p->velocity = vec3_create(
+            cosf(angle_xz) * cosf(angle_y) * speed,
+            sinf(angle_y) * speed,
+            sinf(angle_xz) * cosf(angle_y) * speed
+        );
+        
+        // Orange fire colors
+        p->color[0] = 1.0f;
+        p->color[1] = 0.6f + ((float)rand() / RAND_MAX) * 0.4f;
+        p->color[2] = 0.1f + ((float)rand() / RAND_MAX) * 0.3f;
+        p->color[3] = 1.0f;
+        
+        p->life = 1.5f + ((float)rand() / RAND_MAX) * 1.0f;
+        p->size = 3.0f + ((float)rand() / RAND_MAX) * 4.0f;
+        p->active = true;
+    }
+}
+
+EMSCRIPTEN_KEEPALIVE
+void wasm_add_web_entity(float x, float y, float z, const char* name, const char* tag) {
+    if (!g_game_state) return;
+    
+    WebEntity* entity = create_web_entity(vec3_create(x, y, z), name);
+    if (entity && tag && strlen(tag) > 0) {
+        strncpy(entity->logic.tag, tag, ENTITY_TAG_SIZE - 1);
+        entity->logic.tag[ENTITY_TAG_SIZE - 1] = '\0';
+    }
+}
+
+EMSCRIPTEN_KEEPALIVE
+void wasm_reset_web_game() {
+    if (!g_game_state) return;
+    
+    printf("Resetting web game state\n");
+    
+    // Clear entities and particles
+    g_game_state->entity_count = 0;
+    g_game_state->particle_count = 0;
+    g_game_state->light_count = 0;
+    
+    // Reset game state
+    g_game_state->score = 0;
+    g_game_state->level = 1;
+    g_game_state->paused = false;
+    
+    // Reset performance metrics
+    g_game_state->performance.fps_counter = 0;
+    g_game_state->performance.frame_accumulator = 0.0;
+    g_game_state->performance.dropped_frames = 0;
+    
+    // Recreate initial entities
+    WebEntity* player = create_web_entity(
+        vec3_create(CANVAS_WIDTH/2, CANVAS_HEIGHT/2, 0), "Player");
+    if (player) {
+        player->physics.has_gravity = false;
+        strcpy(player->logic.tag, "Player");
+        player->renderer.color[0] = 0.3f;
+        player->renderer.color[1] = 0.8f;
+        player->renderer.color[2] = 1.0f;
+    }
+    
+    // Create fewer entities for reset
+    for (int i = 0; i < 20; i++) {
+        Vector3 pos = vec3_create(
+            (float)(rand() % (int)CANVAS_WIDTH),
+            (float)(rand() % (int)CANVAS_HEIGHT),
+            0
+        );
+        
+        WebEntity* env = create_web_entity(pos, "Environment");
+        if (env) {
+            snprintf(env->logic.name, ENTITY_NAME_SIZE, "Obj_%d", i);
+            strcpy(env->logic.tag, "Environment");
+        }
+    }
+}
+
+EMSCRIPTEN_KEEPALIVE
+void wasm_set_canvas_size(int width, int height) {
+    if (!g_game_state) return;
+    
+    // Update internal canvas size tracking (for responsive design)
+    // Note: This would typically be handled by JavaScript
+    printf("Canvas resized to %dx%d\n", width, height);
+    
+    // Adjust camera aspect ratio
+    if (height > 0) {
+        // Update camera parameters for new aspect ratio
+        float aspect = (float)width / (float)height;
+        // Camera adjustments would be done here
+    }
+}
+
+EMSCRIPTEN_KEEPALIVE
+int wasm_get_performance_info(float* out_buffer) {
+    if (!g_game_state || !out_buffer) return 0;
+    
+    BrowserPerformanceMetrics* perf = &g_game_state->performance;
+    
+    out_buffer[0] = perf->current_fps;
+    out_buffer[1] = perf->average_frame_time_ms;
+    out_buffer[2] = (float)perf->quality_level;
+    out_buffer[3] = (float)g_game_state->entity_count;
+    out_buffer[4] = (float)g_game_state->particle_count;
+    out_buffer[5] = (float)perf->dropped_frames;
+    out_buffer[6] = g_game_state->adaptive_quality ? 1.0f : 0.0f;
+    
+    return 7; // Number of values returned
+}
+
+EMSCRIPTEN_KEEPALIVE
+void wasm_cleanup_web() {
+    printf("Web Game Engine v1.12 cleaned up\n");
+    deallocate_web_game_state();
+    g_initialized = false;
+}
