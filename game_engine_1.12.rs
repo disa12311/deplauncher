@@ -24,7 +24,586 @@ macro_rules! console_log {
     ($($t:tt)*) => (log(&format_args!($($t)*).to_string()))
 }
 
-// === WEB-SPECIFIC CONSTANTS ===
+// === WEB COLLISION SYSTEM ===
+
+#[derive(Debug)]
+pub struct WebCollisionSystem {
+    spatial_grid: HashMap<(i32, i32), Vec<u32>>,
+    cell_size: f32,
+}
+
+impl WebCollisionSystem {
+    pub fn new() -> Self {
+        Self {
+            spatial_grid: HashMap::new(),
+            cell_size: 64.0,
+        }
+    }
+    
+    pub fn update(&mut self, entities: &mut HashMap<u32, WebEntity>) -> i32 {
+        // Clear spatial grid
+        self.spatial_grid.clear();
+        
+        // Populate spatial grid
+        for (&id, entity) in entities.iter() {
+            if !entity.active {
+                continue;
+            }
+            
+            let grid_x = (entity.transform.position.x / self.cell_size) as i32;
+            let grid_y = (entity.transform.position.y / self.cell_size) as i32;
+            
+            self.spatial_grid.entry((grid_x, grid_y))
+                .or_insert_with(Vec::new)
+                .push(id);
+        }
+        
+        let mut score_increment = 0;
+        let mut collisions = Vec::new();
+        
+        // Check collisions within grid cells
+        for entity_ids in self.spatial_grid.values() {
+            for i in 0..entity_ids.len() {
+                for j in (i + 1)..entity_ids.len() {
+                    let id_a = entity_ids[i];
+                    let id_b = entity_ids[j];
+                    
+                    if let (Some(entity_a), Some(entity_b)) = (entities.get(&id_a), entities.get(&id_b)) {
+                        let distance = (entity_a.transform.position - entity_b.transform.position).magnitude();
+                        let collision_radius = entity_a.physics.as_ref().map(|p| p.collision_radius).unwrap_or(16.0) +
+                                             entity_b.physics.as_ref().map(|p| p.collision_radius).unwrap_or(16.0);
+                        
+                        if distance < collision_radius {
+                            collisions.push((id_a, id_b, distance, collision_radius));
+                            
+                            // Score for player collisions
+                            if entity_a.tag == "Player" || entity_b.tag == "Player" {
+                                score_increment += 10;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        // Resolve collisions
+        for (id_a, id_b, distance, collision_radius) in collisions {
+            if let (Some(entity_a), Some(entity_b)) = (entities.get_mut(&id_a), entities.get_mut(&id_b)) {
+                let direction = (entity_a.transform.position - entity_b.transform.position).normalize();
+                let overlap = collision_radius - distance;
+                
+                // Separate entities
+                entity_a.transform.position += direction * overlap * 0.5;
+                entity_b.transform.position -= direction * overlap * 0.5;
+                
+                // Apply collision response
+                if let (Some(physics_a), Some(physics_b)) = (&entity_a.physics, &entity_b.physics) {
+                    let bounce_force = 100.0 * (physics_a.bounciness + physics_b.bounciness) * 0.5;
+                    
+                    entity_a.transform.velocity += direction * bounce_force;
+                    entity_b.transform.velocity -= direction * bounce_force;
+                }
+            }
+        }
+        
+        score_increment
+    }
+}
+
+// === MAIN WEB GAME STATE ===
+
+#[wasm_bindgen]
+pub struct WebGameState {
+    // Entity management
+    entities: HashMap<u32, WebEntity>,
+    next_entity_id: u32,
+    
+    // Systems
+    particle_system: WebParticleSystem,
+    collision_system: WebCollisionSystem,
+    performance: WebPerformanceMonitor,
+    input: WebInputSystem,
+    
+    // Browser capabilities
+    capabilities: BrowserCapabilities,
+    
+    // Camera
+    camera_position: Vector3<f32>,
+    camera_target: Vector3<f32>,
+    camera_fov: f32,
+    
+    // Physics
+    gravity: Vector3<f32>,
+    physics_enabled: bool,
+    
+    // Game state
+    score: i32,
+    level: i32,
+    time_scale: f32,
+    paused: bool,
+    debug_mode: bool,
+}
+
+#[wasm_bindgen]
+impl WebGameState {
+    #[wasm_bindgen(constructor)]
+    pub fn new() -> Self {
+        console_log!("Creating Web Game State for v1.12 Enhanced Edition");
+        
+        let capabilities = BrowserCapabilities::default();
+        
+        let mut game_state = Self {
+            entities: HashMap::with_capacity(MAX_ENTITIES),
+            next_entity_id: 1,
+            
+            particle_system: WebParticleSystem::new(),
+            collision_system: WebCollisionSystem::new(),
+            performance: WebPerformanceMonitor::new(),
+            input: WebInputSystem::new(),
+            
+            capabilities,
+            
+            camera_position: Vector3::new(CANVAS_WIDTH / 2.0, CANVAS_HEIGHT / 2.0, -500.0),
+            camera_target: Vector3::new(CANVAS_WIDTH / 2.0, CANVAS_HEIGHT / 2.0, 0.0),
+            camera_fov: 75.0,
+            
+            gravity: Vector3::new(0.0, -490.0, 0.0), // Reduced for web
+            physics_enabled: true,
+            
+            score: 0,
+            level: 1,
+            time_scale: 1.0,
+            paused: false,
+            debug_mode: false,
+        };
+        
+        game_state.initialize_scene();
+        game_state
+    }
+    
+    fn initialize_scene(&mut self) {
+        // Create player entity
+        let player_id = self.create_entity("Player".to_string(), Vector3::new(CANVAS_WIDTH / 2.0, CANVAS_HEIGHT / 2.0, 0.0));
+        
+        if let Some(player) = self.entities.get_mut(&player_id) {
+            player.add_physics(WebPhysics {
+                mass: 1.0,
+                use_gravity: false, // Top-down view
+                drag: 5.0,
+                ..Default::default()
+            });
+            
+            player.add_renderer(WebRenderer {
+                color: [0.3, 0.8, 1.0, 1.0], // Cyan
+                ..Default::default()
+            });
+            
+            player.add_health(100.0);
+            player.tag = "Player".to_string();
+        }
+        
+        // Generate environment entities (reduced for web)
+        self.generate_environment(50);
+        
+        console_log!("Scene initialized with {} entities", self.entities.len());
+    }
+    
+    fn generate_environment(&mut self, count: usize) {
+        for i in 0..count {
+            let position = Vector3::new(
+                Math::random() as f32 * CANVAS_WIDTH,
+                Math::random() as f32 * CANVAS_HEIGHT,
+                0.0,
+            );
+            
+            let entity_id = self.create_entity(format!("Environment_{}", i), position);
+            
+            if let Some(entity) = self.entities.get_mut(&entity_id) {
+                entity.add_physics(WebPhysics {
+                    mass: 0.5 + Math::random() as f32 * 2.0,
+                    bounciness: 0.3 + Math::random() as f32 * 0.7,
+                    drag: 0.1 + Math::random() as f32 * 0.8,
+                    ..Default::default()
+                });
+                
+                entity.add_renderer(WebRenderer {
+                    color: [
+                        0.5 + Math::random() as f32 * 0.5,
+                        0.5 + Math::random() as f32 * 0.5,
+                        0.5 + Math::random() as f32 * 0.5,
+                        1.0,
+                    ],
+                    ..Default::default()
+                });
+                
+                entity.tag = "Environment".to_string();
+            }
+        }
+    }
+    
+    pub fn create_entity(&mut self, name: String, position: Vector3<f32>) -> u32 {
+        let id = self.next_entity_id;
+        self.next_entity_id += 1;
+        
+        let entity = WebEntity::new(id, name, position);
+        self.entities.insert(id, entity);
+        
+        id
+    }
+    
+    #[wasm_bindgen]
+    pub fn update(&mut self, current_time: f64) {
+        if self.paused {
+            return;
+        }
+        
+        let delta_time = self.performance.update(current_time) * self.time_scale;
+        
+        // Update input
+        let movement = self.input.get_movement_input();
+        if movement.magnitude() > 0.1 {
+            if let Some(player) = self.entities.get_mut(&1) {
+                let move_speed = 300.0;
+                player.transform.acceleration += movement * move_speed;
+            }
+        }
+        
+        // Update entities based on quality level
+        for entity in self.entities.values_mut() {
+            entity.update(delta_time);
+        }
+        
+        // Update systems based on performance level
+        if self.performance.quality_level >= 1 {
+            if self.physics_enabled {
+                self.update_physics_system(delta_time);
+            }
+            
+            let score_increment = self.collision_system.update(&mut self.entities);
+            self.score += score_increment;
+        }
+        
+        if self.performance.quality_level >= 2 {
+            self.particle_system.update(delta_time);
+        }
+        
+        // Update camera to follow player
+        if let Some(player) = self.entities.get(&1) {
+            let lerp_factor = 3.0 * delta_time;
+            let target = player.transform.position;
+            self.camera_target = self.camera_target.lerp(&target, lerp_factor);
+        }
+        
+        // Cleanup dead entities
+        self.entities.retain(|_, entity| entity.is_alive());
+        
+        // Debug output
+        if self.debug_mode && self.performance.fps_counter % 60 == 0 {
+            console_log!("FPS: {:.1}, Entities: {}, Particles: {}, Quality: {}", 
+                        self.performance.current_fps, 
+                        self.entities.len(), 
+                        self.particle_system.particle_count(),
+                        self.performance.quality_level);
+        }
+    }
+    
+    fn update_physics_system(&mut self, delta_time: f32) {
+        for entity in self.entities.values_mut() {
+            if !entity.active {
+                continue;
+            }
+            
+            if let Some(physics) = &entity.physics {
+                if !physics.is_kinematic && physics.use_gravity {
+                    entity.transform.acceleration += self.gravity;
+                }
+            }
+        }
+    }
+    
+    // === WASM EXPORTS ===
+    
+    #[wasm_bindgen]
+    pub fn handle_key_event(&mut self, key_code: u32, pressed: bool) {
+        self.input.set_key(key_code, pressed);
+        
+        if pressed {
+            match key_code {
+                32 => { // Space
+                    self.paused = !self.paused;
+                    console_log!("Game {}", if self.paused { "paused" } else { "resumed" });
+                }
+                192 => { // Tilde (~)
+                    self.debug_mode = !self.debug_mode;
+                    console_log!("Debug mode {}", if self.debug_mode { "enabled" } else { "disabled" });
+                }
+                _ => {}
+            }
+        }
+    }
+    
+    #[wasm_bindgen]
+    pub fn handle_mouse_event(&mut self, x: f32, y: f32, delta_x: f32, delta_y: f32) {
+        self.input.set_mouse(x, y, delta_x, delta_y);
+    }
+    
+    #[wasm_bindgen]
+    pub fn handle_touch_event(&mut self, touches: Vec<f32>) {
+        let touch_pairs: Vec<(f32, f32)> = touches
+            .chunks_exact(2)
+            .map(|chunk| (chunk[0], chunk[1]))
+            .collect();
+        self.input.set_touch(touch_pairs);
+    }
+    
+    #[wasm_bindgen]
+    pub fn get_score(&self) -> i32 {
+        self.score
+    }
+    
+    #[wasm_bindgen]
+    pub fn get_entity_count(&self) -> usize {
+        self.entities.len()
+    }
+    
+    #[wasm_bindgen]
+    pub fn get_particle_count(&self) -> usize {
+        self.particle_system.particle_count()
+    }
+    
+    #[wasm_bindgen]
+    pub fn get_fps(&self) -> f32 {
+        self.performance.current_fps
+    }
+    
+    #[wasm_bindgen]
+    pub fn get_frame_time(&self) -> f32 {
+        self.performance.average_frame_time_ms
+    }
+    
+    #[wasm_bindgen]
+    pub fn get_quality_level(&self) -> u8 {
+        self.performance.quality_level
+    }
+    
+    #[wasm_bindgen]
+    pub fn set_quality_level(&mut self, quality: u8) {
+        self.performance.quality_level = quality.min(2);
+        self.performance.adaptive_quality = false;
+        console_log!("Quality manually set to {}", self.performance.quality_level);
+    }
+    
+    #[wasm_bindgen]
+    pub fn enable_adaptive_quality(&mut self, enabled: bool) {
+        self.performance.adaptive_quality = enabled;
+        console_log!("Adaptive quality {}", if enabled { "enabled" } else { "disabled" });
+    }
+    
+    #[wasm_bindgen]
+    pub fn get_entity_render_data(&self) -> Vec<f32> {
+        let mut data = Vec::with_capacity(self.entities.len() * 16);
+        
+        for entity in self.entities.values() {
+            if !entity.active || !entity.renderer.as_ref().map_or(false, |r| r.visible) {
+                continue;
+            }
+            
+            let transform = &entity.transform;
+            let renderer = entity.renderer.as_ref().unwrap();
+            
+            // Transform matrix (simplified 2D)
+            data.extend_from_slice(&[
+                transform.scale, 0.0, 0.0, transform.position.x,
+                0.0, transform.scale, 0.0, transform.position.y,
+                0.0, 0.0, transform.scale, transform.position.z,
+                renderer.color[0], renderer.color[1], renderer.color[2], 
+                renderer.color[3] * renderer.opacity,
+            ]);
+        }
+        
+        data
+    }
+    
+    #[wasm_bindgen]
+    pub fn get_particle_render_data(&self) -> Vec<f32> {
+        self.particle_system.get_render_data()
+    }
+    
+    #[wasm_bindgen]
+    pub fn get_camera_data(&self) -> Vec<f32> {
+        vec![
+            self.camera_position.x, self.camera_position.y, self.camera_position.z,
+            self.camera_target.x, self.camera_target.y, self.camera_target.z,
+            self.camera_fov,
+        ]
+    }
+    
+    #[wasm_bindgen]
+    pub fn create_explosion(&mut self, x: f32, y: f32, z: f32, intensity: f32) {
+        let position = Vector3::new(x, y, z);
+        self.particle_system.create_explosion(position, intensity);
+    }
+    
+    #[wasm_bindgen]
+    pub fn add_entity(&mut self, x: f32, y: f32, z: f32, name: String, tag: String) -> u32 {
+        let position = Vector3::new(x, y, z);
+        let entity_id = self.create_entity(name, position);
+        
+        if let Some(entity) = self.entities.get_mut(&entity_id) {
+            entity.tag = tag;
+            
+            entity.add_physics(WebPhysics::default());
+            entity.add_renderer(WebRenderer::default());
+        }
+        
+        entity_id
+    }
+    
+    #[wasm_bindgen]
+    pub fn set_browser_capabilities(&mut self, 
+                                   webgl2: bool, 
+                                   hardware_accel: bool, 
+                                   is_mobile: bool, 
+                                   cpu_cores: u32) {
+        self.capabilities.webgl2_available = webgl2;
+        self.capabilities.hardware_acceleration = hardware_accel;
+        self.capabilities.is_mobile = is_mobile;
+        self.capabilities.cpu_cores = cpu_cores;
+        
+        // Adjust performance based on capabilities
+        if is_mobile || !hardware_accel {
+            self.performance.quality_level = 1; // Start with medium quality on mobile/slow devices
+        }
+        
+        console_log!("Browser capabilities updated: WebGL2={}, HW Accel={}, Mobile={}, Cores={}", 
+                    webgl2, hardware_accel, is_mobile, cpu_cores);
+    }
+    
+    #[wasm_bindgen]
+    pub fn get_performance_info(&self) -> JsValue {
+        let info = js_sys::Object::new();
+        
+        js_sys::Reflect::set(&info, &"fps".into(), &self.performance.current_fps.into()).unwrap();
+        js_sys::Reflect::set(&info, &"frameTime".into(), &self.performance.average_frame_time_ms.into()).unwrap();
+        js_sys::Reflect::set(&info, &"qualityLevel".into(), &self.performance.quality_level.into()).unwrap();
+        js_sys::Reflect::set(&info, &"adaptiveQuality".into(), &self.performance.adaptive_quality.into()).unwrap();
+        js_sys::Reflect::set(&info, &"entityCount".into(), &self.entities.len().into()).unwrap();
+        js_sys::Reflect::set(&info, &"particleCount".into(), &self.particle_system.particle_count().into()).unwrap();
+        js_sys::Reflect::set(&info, &"droppedFrames".into(), &self.performance.dropped_frames.into()).unwrap();
+        
+        info.into()
+    }
+    
+    #[wasm_bindgen]
+    pub fn reset_game(&mut self) {
+        console_log!("Resetting web game state");
+        
+        self.entities.clear();
+        self.next_entity_id = 1;
+        self.score = 0;
+        self.level = 1;
+        self.paused = false;
+        
+        self.particle_system = WebParticleSystem::new();
+        self.collision_system = WebCollisionSystem::new();
+        
+        self.initialize_scene();
+    }
+    
+    #[wasm_bindgen]
+    pub fn cleanup(&mut self) {
+        console_log!("Cleaning up Web Game Engine v1.12");
+        self.entities.clear();
+        self.particle_system = WebParticleSystem::new();
+    }
+}
+
+// === WASM ENGINE WRAPPER ===
+
+#[wasm_bindgen]
+pub struct WebGameEngine {
+    game_state: WebGameState,
+}
+
+#[wasm_bindgen]
+impl WebGameEngine {
+    #[wasm_bindgen(constructor)]
+    pub fn new() -> WebGameEngine {
+        console_log!("Initializing WASM Web Game Engine v1.12");
+        std::panic::set_hook(Box::new(console_error_panic_hook::hook));
+        
+        WebGameEngine {
+            game_state: WebGameState::new(),
+        }
+    }
+    
+    #[wasm_bindgen]
+    pub fn update_frame(&mut self, current_time: f64) {
+        self.game_state.update(current_time);
+    }
+    
+    #[wasm_bindgen]
+    pub fn handle_key(&mut self, key_code: u32, pressed: bool) {
+        self.game_state.handle_key_event(key_code, pressed);
+    }
+    
+    #[wasm_bindgen]
+    pub fn handle_mouse(&mut self, x: f32, y: f32, delta_x: f32, delta_y: f32) {
+        self.game_state.handle_mouse_event(x, y, delta_x, delta_y);
+    }
+    
+    #[wasm_bindgen]
+    pub fn handle_touch(&mut self, touches: Vec<f32>) {
+        self.game_state.handle_touch_event(touches);
+    }
+    
+    #[wasm_bindgen]
+    pub fn get_render_data(&self) -> JsValue {
+        let data = js_sys::Object::new();
+        
+        let entities = self.game_state.get_entity_render_data();
+        js_sys::Reflect::set(&data, &"entities".into(), 
+                           &js_sys::Float32Array::from(&entities[..]).into()).unwrap();
+        
+        let particles = self.game_state.get_particle_render_data();
+        js_sys::Reflect::set(&data, &"particles".into(), 
+                           &js_sys::Float32Array::from(&particles[..]).into()).unwrap();
+        
+        let camera = self.game_state.get_camera_data();
+        js_sys::Reflect::set(&data, &"camera".into(), 
+                           &js_sys::Float32Array::from(&camera[..]).into()).unwrap();
+        
+        data.into()
+    }
+    
+    #[wasm_bindgen]
+    pub fn get_performance_info(&self) -> JsValue {
+        self.game_state.get_performance_info()
+    }
+    
+    #[wasm_bindgen]
+    pub fn set_browser_capabilities(&mut self, webgl2: bool, hardware_accel: bool, is_mobile: bool, cpu_cores: u32) {
+        self.game_state.set_browser_capabilities(webgl2, hardware_accel, is_mobile, cpu_cores);
+    }
+    
+    #[wasm_bindgen]
+    pub fn reset(&mut self) {
+        self.game_state.reset_game();
+    }
+    
+    #[wasm_bindgen]
+    pub fn cleanup(&mut self) {
+        self.game_state.cleanup();
+    }
+}
+
+// === ENTRY POINT ===
+
+#[wasm_bindgen(start)]
+pub fn main() {
+    console_log!("WASM Web Game Engine v1.12 Enhanced Edition loaded successfully!");
+    console_log!("Features: WebGL Optimized, Adaptive Quality, Mobile Support, Performance Monitoring");
+} WEB-SPECIFIC CONSTANTS ===
 const MAX_ENTITIES: usize = 2000;        // Optimized for web
 const MAX_PARTICLES: usize = 5000;       // WebGL friendly
 const MAX_LIGHTS: usize = 25;            // WebGL shader limit
@@ -534,5 +1113,4 @@ impl WebInputSystem {
         movement
     }
 }
-
 // ===
